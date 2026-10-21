@@ -1,0 +1,28 @@
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+*.iml
+*.swp
+
+# Env and secrets
+.env
+.env.*
+!.env.example
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+coverage/
+*.log
+
+# Kotlin / Gradle
+.gradle/
+build/
+out/
+.kotlin/
+local.properties
+
+# Claude Code local settings
+.claude/settings.local.json
