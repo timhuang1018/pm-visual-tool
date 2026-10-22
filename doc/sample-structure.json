@@ -1,0 +1,343 @@
+{
+  "about": "Structure for the sample backlog in tasks.md, as an agent would build it: the owner's requirements (rephrased), phases and sub-groups with goals, which tasks serve which requirement, labels on phase links (what flows) and notes. Tasks themselves come from tasks.md.",
+  "requirements": [
+    {
+      "id": "R-1",
+      "title": "Collect every earnings call automatically",
+      "detail": "Detect each announced call for covered companies, fetch the recording and slide deck (including company-hosted webcasts) and transcribe it daily without hand work."
+    },
+    {
+      "id": "R-2",
+      "title": "Pull out forward-looking claims",
+      "detail": "From each transcript extract mentions, terms, facts and forward-looking statements, graded against a quality bar before they are stored."
+    },
+    {
+      "id": "R-3",
+      "title": "Connect claims to a knowledge graph",
+      "detail": "Link each claim to companies, products, segments and terms, keeping sources and lineage."
+    },
+    {
+      "id": "R-4",
+      "title": "Check promises against reported results",
+      "detail": "Compare each forward-looking statement with later reported results (including segment figures) and score each company's track record."
+    },
+    {
+      "id": "R-5",
+      "title": "Publish it on the site",
+      "detail": "Public scorecard, company pages and topic pages; only republishable quotes; public only after the owner approves."
+    },
+    {
+      "id": "R-6",
+      "title": "Run daily, unattended, within budget",
+      "detail": "One evening run plus an overnight backlog lane; every model call configurable; spend capped with alerts."
+    }
+  ],
+  "groups": [
+    {
+      "id": "collect",
+      "name": "Collect & transcribe",
+      "goal": "Every announced call is fetched and transcribed, unattended",
+      "order": 1
+    },
+    {
+      "id": "extract",
+      "name": "Extract claims",
+      "goal": "Each call yields graded facts and forward-looking statements",
+      "order": 2
+    },
+    {
+      "id": "extract-core",
+      "name": "Claims extractor",
+      "goal": "A glossary-aware extractor that passes its quality bar",
+      "parent": "extract",
+      "order": 1
+    },
+    {
+      "id": "extract-coverage",
+      "name": "Coverage & backlog",
+      "goal": "The right calls get extracted, newest first, within budget",
+      "parent": "extract",
+      "order": 2
+    },
+    {
+      "id": "graph",
+      "name": "Knowledge graph",
+      "goal": "Claims link to companies, products, terms and sources",
+      "order": 3
+    },
+    {
+      "id": "graph-store",
+      "name": "Store & readers",
+      "goal": "One graph store with lineage and one shared reader",
+      "parent": "graph",
+      "order": 1
+    },
+    {
+      "id": "graph-terms",
+      "name": "Terms & glossary",
+      "goal": "Ambiguous terms resolve without hand work",
+      "parent": "graph",
+      "order": 2
+    },
+    {
+      "id": "graph-company",
+      "name": "Company facts",
+      "goal": "Segments, customers and report figures are in the graph",
+      "parent": "graph",
+      "order": 3
+    },
+    {
+      "id": "score",
+      "name": "Check promises",
+      "goal": "Statements are checked against results; companies get a track record",
+      "order": 4
+    },
+    {
+      "id": "publish",
+      "name": "Publish",
+      "goal": "Scorecard, company and topic pages are live",
+      "order": 5
+    },
+    {
+      "id": "operate",
+      "name": "Run & operate",
+      "goal": "One daily run, switchable models, spend under control",
+      "order": 6
+    },
+    {
+      "id": "milestone",
+      "name": "Reference case",
+      "goal": "One reference company passes every bar and is frozen as the benchmark",
+      "order": 7
+    }
+  ],
+  "areaGroups": {
+    "Ingest": "collect",
+    "Scoring": "score",
+    "Publishing": "publish",
+    "Orchestration": "operate",
+    "Model platform": "operate",
+    "Milestone": "milestone"
+  },
+  "taskGroups": {
+    "extract-core": [
+      "T-27",
+      "T-11",
+      "T-16",
+      "T-30",
+      "T-41",
+      "T-46"
+    ],
+    "extract-coverage": [
+      "T-03",
+      "T-10",
+      "T-31",
+      "T-32",
+      "T-50"
+    ],
+    "graph-store": [
+      "T-39",
+      "T-42",
+      "T-06",
+      "T-25",
+      "T-54",
+      "T-52"
+    ],
+    "graph-terms": [
+      "T-17",
+      "T-23",
+      "T-58",
+      "T-35"
+    ],
+    "graph-company": [
+      "T-33",
+      "T-45",
+      "T-48",
+      "T-56"
+    ]
+  },
+  "phaseRequirements": {
+    "collect": [
+      "R-1"
+    ],
+    "extract": [
+      "R-2"
+    ],
+    "graph": [
+      "R-3"
+    ],
+    "score": [
+      "R-4"
+    ],
+    "publish": [
+      "R-5"
+    ],
+    "operate": [
+      "R-6"
+    ],
+    "milestone": [
+      "R-2",
+      "R-3",
+      "R-4"
+    ]
+  },
+  "extraRequirements": {
+    "T-15": [
+      "R-6"
+    ],
+    "T-31": [
+      "R-6"
+    ],
+    "T-43": [
+      "R-3"
+    ]
+  },
+  "unlinked": [
+    "T-07",
+    "T-53"
+  ],
+  "labels": [
+    {
+      "from": "collect",
+      "to": "extract",
+      "label": "transcripts"
+    },
+    {
+      "from": "extract",
+      "to": "graph",
+      "label": "mentions & terms"
+    },
+    {
+      "from": "graph",
+      "to": "extract",
+      "label": "knowledge packs"
+    },
+    {
+      "from": "extract",
+      "to": "score",
+      "label": "forward-looking statements"
+    },
+    {
+      "from": "graph",
+      "to": "score",
+      "label": "linked claims, segment figures"
+    },
+    {
+      "from": "score",
+      "to": "publish",
+      "label": "scores & track records"
+    },
+    {
+      "from": "graph",
+      "to": "publish",
+      "label": "company & topic graph"
+    },
+    {
+      "from": "collect",
+      "to": "publish",
+      "label": "republish rights"
+    },
+    {
+      "from": "extract",
+      "to": "operate",
+      "label": "extraction step"
+    },
+    {
+      "from": "score",
+      "to": "operate",
+      "label": "scoring step"
+    },
+    {
+      "from": "publish",
+      "to": "operate",
+      "label": "scorecard render"
+    },
+    {
+      "from": "collect",
+      "to": "operate",
+      "label": "media adapters"
+    },
+    {
+      "from": "operate",
+      "to": "extract",
+      "label": "priority order"
+    },
+    {
+      "from": "graph",
+      "to": "collect",
+      "label": "terms as speech hints"
+    },
+    {
+      "from": "collect",
+      "to": "milestone",
+      "label": "reference call text"
+    },
+    {
+      "from": "extract",
+      "to": "milestone",
+      "label": "readiness check"
+    },
+    {
+      "from": "graph",
+      "to": "milestone",
+      "label": "terms, links, report parser"
+    },
+    {
+      "from": "score",
+      "to": "milestone",
+      "label": "claims bar"
+    },
+    {
+      "from": "publish",
+      "to": "milestone",
+      "label": "company page"
+    },
+    {
+      "from": "publish",
+      "to": "graph",
+      "label": "provenance build"
+    }
+  ],
+  "notes": [
+    {
+      "target": "task:T-03",
+      "tone": "deadline",
+      "text": "Due before the next results season"
+    },
+    {
+      "target": "task:T-36",
+      "tone": "deadline",
+      "text": "Due before the next results season"
+    },
+    {
+      "target": "task:T-19",
+      "tone": "deadline",
+      "text": "Due before the reference company's next call"
+    },
+    {
+      "target": "task:T-18",
+      "tone": "deadline",
+      "text": "Ships with this week's deploy"
+    },
+    {
+      "target": "task:T-37",
+      "tone": "risk",
+      "text": "Model-based linker failed its gates; retry after the re-link"
+    },
+    {
+      "target": "task:T-38",
+      "tone": "info",
+      "text": "Biggest block of uncheckable claims"
+    },
+    {
+      "target": "group:extract",
+      "tone": "decision",
+      "text": "Phase 1 covers one sector; old-call backlog paused"
+    },
+    {
+      "target": "group:publish",
+      "tone": "decision",
+      "text": "Internal first; public only on the owner's go"
+    }
+  ]
+}

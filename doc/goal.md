@@ -28,4 +28,8 @@ Starting points only; they can change once planning starts.
 
 ## Status
 
-Repo set up; planning and implementation not started.
+Version 1.0.0 released. The flow-chart board, the `pmv` CLI for agents, and the UX walkthrough tool
+are built; see [README](../README.md) and [CHANGELOG](../CHANGELOG.md). The suggested Ktor + PostgreSQL
+stack was replaced by a single lightweight Node process per project with JSON-file storage, so the tool
+drops into any project with one dev dependency. The HTTP/WebSocket contract
+([docs/data-model.md](../docs/data-model.md)) is what to keep if it is ever ported.

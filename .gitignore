@@ -26,3 +26,9 @@ local.properties
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Local board data, walkthrough reports, packed tarballs
+data/
+.pm-visual/
+ux-report/
+*.tgz

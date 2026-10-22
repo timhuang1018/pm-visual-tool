@@ -1,0 +1,26 @@
+{
+  "requirements": [
+    { "id": "R-1", "title": "Daily sales data from the shop API", "detail": "Orders and refunds from the Shopify Admin API, pulled nightly into the warehouse" },
+    { "id": "R-2", "title": "Revenue numbers I can trust", "detail": "Revenue by product and region, refunds netted out, one currency" },
+    { "id": "R-3", "title": "A weekly revenue dashboard", "detail": "Refreshed Monday 08:00 for the sales team" }
+  ],
+  "groups": [
+    { "id": "ingest", "name": "Ingest", "goal": "Orders and refunds land in the warehouse every night", "order": 1 },
+    { "id": "model", "name": "Model", "goal": "Clean revenue tables the dashboard can trust", "order": 2 },
+    { "id": "ui", "name": "Dashboard", "goal": "The sales team uses it every Monday", "order": 3 }
+  ],
+  "tasks": [
+    { "id": "T-01", "title": "Shopify API client + nightly job", "group": "ingest", "requirements": ["R-1"], "effort": "M", "impact": "L" },
+    { "id": "T-02", "title": "Sample revenue table for owner review", "group": "model", "requirements": ["R-2"], "effort": "S", "impact": "L", "dependsOn": ["T-01"], "gate": "Owner checks the numbers on one week" },
+    { "id": "T-03", "title": "Refunds and currency normalisation", "group": "model", "requirements": ["R-2"], "effort": "M", "dependsOn": ["T-02"] },
+    { "id": "T-04", "title": "Revenue tables by product and region", "group": "model", "requirements": ["R-2"], "effort": "M", "dependsOn": ["T-03"] },
+    { "id": "T-05", "title": "Dashboard page", "group": "ui", "requirements": ["R-3"], "effort": "M", "dependsOn": ["T-04"] },
+    { "id": "T-06", "title": "Data dictionary for the sales team", "group": "ui", "requirements": ["R-3"], "effort": "S", "impact": "S" },
+    { "id": "T-07", "title": "Monday 08:00 refresh and alert", "group": "ui", "requirements": ["R-3"], "effort": "S", "dependsOn": ["T-05"] }
+  ],
+  "labels": [
+    { "from": "ingest", "to": "model", "label": "raw orders & refunds" },
+    { "from": "model", "to": "ui", "label": "revenue tables" }
+  ],
+  "notes": [{ "target": "group:ui", "tone": "deadline", "text": "Needed for the Q3 sales kickoff" }]
+}

@@ -1,0 +1,198 @@
+{
+  "requirements": [
+    {
+      "id": "R-1",
+      "title": "Sign up from the landing page",
+      "detail": "Email + password form on the existing landing page; duplicate emails rejected"
+    },
+    {
+      "id": "R-2",
+      "title": "Verify the email address",
+      "detail": "A verification link by email; unverified accounts cannot log in"
+    },
+    {
+      "id": "R-3",
+      "title": "Dashboard of signups per day",
+      "detail": "Daily signups and verification rate, last 30 days, for the owner"
+    }
+  ],
+  "groups": [
+    {
+      "id": "store",
+      "name": "Store signups",
+      "goal": "Every signup is saved once, safely",
+      "order": 1
+    },
+    {
+      "id": "verify",
+      "name": "Verify email",
+      "goal": "Only verified people can log in",
+      "order": 2
+    },
+    {
+      "id": "form",
+      "name": "Signup form",
+      "goal": "Visitors can sign up from the landing page",
+      "order": 3
+    },
+    {
+      "id": "dash",
+      "name": "Dashboard",
+      "goal": "The owner sees signups per day",
+      "order": 4
+    }
+  ],
+  "tasks": [
+    {
+      "id": "D-01",
+      "title": "Agree on fields and copy",
+      "group": "form",
+      "requirements": [
+        "R-1"
+      ],
+      "effort": "S",
+      "impact": "L",
+      "gate": "Owner approves fields and copy"
+    },
+    {
+      "id": "D-02",
+      "title": "Users table and migration",
+      "group": "store",
+      "requirements": [
+        "R-1"
+      ],
+      "effort": "S"
+    },
+    {
+      "id": "D-03",
+      "title": "Signup API with validation",
+      "group": "store",
+      "requirements": [
+        "R-1"
+      ],
+      "effort": "M",
+      "dependsOn": [
+        "D-01",
+        "D-02"
+      ]
+    },
+    {
+      "id": "D-04",
+      "title": "Send verification email",
+      "group": "verify",
+      "requirements": [
+        "R-2"
+      ],
+      "effort": "M",
+      "dependsOn": [
+        "D-03"
+      ]
+    },
+    {
+      "id": "D-05",
+      "title": "Verify link + block unverified login",
+      "group": "verify",
+      "requirements": [
+        "R-2"
+      ],
+      "effort": "M",
+      "dependsOn": [
+        "D-04"
+      ]
+    },
+    {
+      "id": "D-06",
+      "title": "Signup form on the landing page",
+      "group": "form",
+      "requirements": [
+        "R-1"
+      ],
+      "effort": "M",
+      "dependsOn": [
+        "D-01",
+        "D-03"
+      ]
+    },
+    {
+      "id": "D-07",
+      "title": "Preview deploy for owner review",
+      "group": "form",
+      "requirements": [
+        "R-1",
+        "R-2"
+      ],
+      "effort": "S",
+      "dependsOn": [
+        "D-06"
+      ],
+      "gate": "Owner clicks through the preview",
+      "meta": {
+        "preview": "https://example.com/preview"
+      }
+    },
+    {
+      "id": "D-08",
+      "title": "Daily signup counts query",
+      "group": "dash",
+      "requirements": [
+        "R-3"
+      ],
+      "effort": "S",
+      "dependsOn": [
+        "D-02"
+      ]
+    },
+    {
+      "id": "D-09",
+      "title": "Dashboard page",
+      "group": "dash",
+      "requirements": [
+        "R-3"
+      ],
+      "effort": "M",
+      "dependsOn": [
+        "D-08",
+        "D-05"
+      ]
+    }
+  ],
+  "labels": [
+    {
+      "from": "store",
+      "to": "verify",
+      "label": "new accounts"
+    },
+    {
+      "from": "store",
+      "to": "form",
+      "label": "signup API"
+    },
+    {
+      "from": "store",
+      "to": "dash",
+      "label": "users table"
+    },
+    {
+      "from": "verify",
+      "to": "dash",
+      "label": "verification status"
+    },
+    {
+      "from": "form",
+      "to": "store",
+      "label": "agreed fields"
+    }
+  ],
+  "notes": [
+    {
+      "target": "group:verify",
+      "tone": "decision",
+      "text": "Uses the existing email provider; no new vendor"
+    },
+    {
+      "target": "task:D-07",
+      "tone": "deadline",
+      "text": "Owner wants something to click by Friday"
+    }
+  ]
+}
