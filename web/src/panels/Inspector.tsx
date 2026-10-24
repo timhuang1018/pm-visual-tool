@@ -209,6 +209,21 @@ function TaskDetails({ view, id, api, actor, reqDots, onSelect, onReveal, onOpen
         <ReqChips ids={t.requirements} reqDots={reqDots} onTrace={onTrace} />
       </div>
       <MetaList meta={t.meta} />
+      {t.backlog ? (
+        <p className="ins-why">
+          Backlog row {t.backlog.id}: <b>{t.backlog.status}</b>
+          {t.backlog.brief && (
+            <>
+              {' · '}
+              <span className="mono">{t.backlog.brief}</span>
+            </>
+          )}
+          . Status and size are kept in {p.backlog?.files[0] ?? 'the backlog'}.
+        </p>
+      ) : (
+        p.backlog &&
+        t.status !== 'done' && <p className="ins-why">Proposed: not in {p.backlog.files[0]} yet. The agent hands it to the backlog once you agree.</p>
+      )}
 
       <div className="tp-actions">
         <button className={`btn ${pinned ? 'btn-on' : 'btn-primary'}`} onClick={() => api.setPins(pinned ? p.pins.filter((x) => x !== t.id) : [...p.pins, t.id]).catch(report)}>
@@ -225,7 +240,7 @@ function TaskDetails({ view, id, api, actor, reqDots, onSelect, onReveal, onOpen
       <div className="tp-grid">
         <label className="field">
           <span className="label">Status</span>
-          <select className="input" value={t.status} onChange={(e) => patch({ status: e.target.value as Status })}>
+          <select className="input" value={t.status} disabled={!!t.backlog} onChange={(e) => patch({ status: e.target.value as Status })}>
             {STATUSES.map((s) => (
               <option key={s} value={s}>
                 {STATUS_LABEL[s]}
@@ -248,11 +263,11 @@ function TaskDetails({ view, id, api, actor, reqDots, onSelect, onReveal, onOpen
         </label>
         <label className="field">
           <span className="label">Impact</span>
-          <SizeSeg value={t.impact} onChange={(v) => patch({ impact: v })} />
+          <SizeSeg value={t.impact} disabled={!!t.backlog} onChange={(v) => patch({ impact: v })} />
         </label>
         <label className="field">
           <span className="label">Effort</span>
-          <SizeSeg value={t.effort} onChange={(v) => patch({ effort: v })} />
+          <SizeSeg value={t.effort} disabled={!!t.backlog} onChange={(v) => patch({ effort: v })} />
         </label>
       </div>
 
@@ -539,11 +554,11 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: '
   );
 }
 
-function SizeSeg({ value, onChange }: { value: Size; onChange: (s: Size) => void }) {
+function SizeSeg({ value, onChange, disabled }: { value: Size; onChange: (s: Size) => void; disabled?: boolean }) {
   return (
     <span className="seg seg-size">
       {SIZES.map((s) => (
-        <button key={s} type="button" className={value === s ? 'on' : ''} onClick={() => value !== s && onChange(s)}>
+        <button key={s} type="button" disabled={disabled} className={value === s ? 'on' : ''} onClick={() => value !== s && onChange(s)}>
           {s}
         </button>
       ))}

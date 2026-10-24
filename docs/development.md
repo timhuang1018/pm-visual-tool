@@ -10,7 +10,7 @@
 | `server/index.ts` | Development entry: API on :4317 with `data/` and the sample project |
 | `shared/` | Types, dependency analysis (critical path, work order), structure rollups and plan check, Now, plan text |
 | `web/` | React + React Flow UI (requirements rail, phase/task views, Now, Details) |
-| `agent/` | What `pmv init` installs into host projects (`SKILL.md`) and the demo plan |
+| `agent/` | The agent skill (`pm-visual/`, installed by `pmv init` and published to skill-repo) and the demo plan |
 | `tests/` | Unit tests (`npm test`); use-case walkthrough scenarios in `tests/ux/` |
 | `doc/` | Goal, sample backlog (`tasks.md` + `sample-structure.json`), use cases |
 | `docs/` | User and agent documentation |
@@ -33,13 +33,13 @@ npm run build      # type-check + dist/ui + dist/cli.js
 - `npm run build:pkg` builds the UI with Vite into `dist/ui` and bundles the CLI and server with
   esbuild into a single `dist/cli.js`. The only runtime dependency is `ws`; React and React Flow are
   bundled into the UI.
-- `prepare` runs `build:pkg`, so `npm i -D github:timhuang1018/pm-visual-tool` builds on install.
+- `prepare` runs `build:pkg`, so `npm i -g github:timhuang1018/pm-visual-tool#<tag>` builds on install.
 - To check a release locally:
 
   ```sh
   npm pack
-  cd /tmp/host && npm init -y && npm i -D /path/to/pm-visual-1.0.0.tgz
-  npx pmv init && npx pmv import plan.json && npx pmv shot
+  npm i -g --prefix /tmp/pmv-global /path/to/pm-visual-<version>.tgz
+  cd /tmp/host && PATH=/tmp/pmv-global/bin:$PATH pmv init && pmv import plan.json && pmv brief
   ```
 
 ## UX walkthrough (development and debugging tool)
@@ -77,5 +77,5 @@ PNG the agent can look at before telling the user it's ready.
 - **The owner's principles drive the UI.** They are in [doc/use-cases.md](../doc/use-cases.md): top-down, little text per
   card, state shown by encoding rather than pop-ups, a way back at every level, everything changeable
   from the chart.
-- **Keep [agent/SKILL.md](../agent/SKILL.md) and [docs/cli.md](cli.md) in sync with `cli/main.ts`.**
+- **Keep [agent/pm-visual/](../agent/pm-visual/SKILL.md) and [docs/cli.md](cli.md) in sync with `cli/main.ts`.**
 - **The server is the source of rules**: who can approve, gates, cycles. The UI and CLI only present them.

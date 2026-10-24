@@ -26,24 +26,37 @@ element to request a change. The agent picks it all up through its CLI.
 In any project:
 
 ```sh
-npm i -D github:timhuang1018/pm-visual-tool   # adds the `pmv` CLI (runtime dependency: ws)
-npx pmv init                                  # creates .pm-visual/, starts the board, installs the agent skill
-npx pmv open --browser                        # opens http://127.0.0.1:<port>/#/<project>
+npm i -g github:timhuang1018/pm-visual-tool#v1.1.0   # the `pmv` CLI (runtime dependency: ws); no package.json changes
+pmv init                                             # creates .pm-visual/, starts the board, installs the agent skill
+pmv open --browser                                   # opens http://127.0.0.1:<port>/#/<project>
 ```
 
 Then ask your agent something like *"plan this on the board"* or *"show me the tasks visually"*.
-`pmv init` installs [`.agents/skills/pm-visual/SKILL.md`](agent/SKILL.md), which teaches the agent to:
+`pmv init` installs the [`pm-visual` skill](agent/pm-visual/SKILL.md) into `.claude/skills/` and
+`.agents/skills/`, unless you already have it user-wide. The skill teaches the agent to:
 
 ```sh
 pmv import plan.json    # requirements, phases, tasks, links, notes, all in one file
 pmv check               # fix what makes the chart hard to read
-pmv inbox && pmv plan   # every session: your requests first, then the work order
+pmv brief               # every session: ~12 lines, your requests first, then critical path and next
 pmv start T-04 && pmv done T-04
 pmv ask T-02 "Week or month?"
 pmv shot                # screenshot a view to check it before handing over (optional, needs playwright-core)
 ```
 
-Try it without an agent: `npx pmv demo`.
+Try it without an agent: `pmv demo`.
+
+### With a backlog
+
+If the repo keeps a backlog (`docs/BACKLOG.md`, owned by a PM agent), the board becomes a sketch
+layer in front of it. It shows how a chosen slice of rows relates, and stages new work as proposals:
+
+```sh
+pmv pull BL-101 --related          # lists BL-101 and the rows it names; nothing added yet
+pmv pull BL-101 BL-102 --yes       # mirrors them: status and size stay owned by the backlog
+pmv proposals                      # board-only work as ingest cards for the PM
+pmv adopt T-03 BL-120              # once the PM wrote the row, the card becomes it
+```
 
 ## What you see
 
@@ -81,7 +94,7 @@ ignore it as you like.
 
 | Doc | For |
 |---|---|
-| [agent/SKILL.md](agent/SKILL.md) | **Agents**: how to plan, work and handle change requests (installed into projects by `pmv init`) |
+| [agent/pm-visual/SKILL.md](agent/pm-visual/SKILL.md) | **Agents**: how to plan, scope, work and hand proposals to the backlog (installed per project by `pmv init`, or `skill-sync install pm-visual --scope project`) |
 | [docs/cli.md](docs/cli.md) | Every `pmv` command, environment variables, files |
 | [docs/data-model.md](docs/data-model.md) | `plan.json` schema, element references, how the critical path and work order are computed, plan checks, HTTP API |
 | [docs/development.md](docs/development.md) | Working on PM Visual itself: dev server, tests, packaging, the UX walkthrough tool |

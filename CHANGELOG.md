@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.1.0 — 2026-10-24
+
+### Backlog bridge
+- `pmv pull` mirrors chosen rows of a repo's backlog file (`docs/BACKLOG.md`, `docs/BACKLOG-done.md`; any column order). It never writes the backlog.
+  - Adds only named or matched rows, as a dry run unless `--yes`.
+  - `--related` adds the rows they name.
+  - Without ids it refreshes the rows already there.
+- Status and sizing of a mirrored row come only from the backlog; the server refuses edits. Cards keep the row's own status word (e.g. *Icebox*).
+- Board-only work on a linked board is a **proposal**, tagged *Proposed*. It may depend on any row, done ones too.
+- `pmv proposals` prints ingest cards for the backlog owner. `pmv adopt <task> <row>` links a proposal to its new row and renames it everywhere.
+- New plan checks:
+  - `BOARD_LARGE`: more than 40 tasks;
+  - `DONE_WAITS_ON_OPEN`;
+  - `BACKLOG_MENTION`: rows that name each other but aren't linked.
+- Mirrored rows are exempt from the requirement-tracing checks.
+
+### For agents
+- `pmv brief`: about 12 lines per session instead of `inbox` + `plan`.
+- The agent skill moved to `agent/pm-visual/` (SKILL.md plus `references/plan-format.md`, read on demand). Its trigger is narrowed to explicit requests to see or steer work visually.
+- `pmv init` installs the skill where Claude Code and Codex read it (`.claude/skills/`, `.agents/skills/`). It skips the install when a user-wide copy exists.
+- The skill is experimental and project-scoped (`scope: project`): it's installed per repo, never user-wide.
+- Install globally (`npm i -g github:timhuang1018/pm-visual-tool#v1.1.0`), so no `package.json` changes.
+
 ## 1.0.0 — 2026-10-22
 
 First release.

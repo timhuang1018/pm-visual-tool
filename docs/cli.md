@@ -7,7 +7,7 @@ Humans mostly use `init`, `open` and the browser.
 
 | Command | Does |
 |---|---|
-| `pmv init [--name "..."] [--id x] [--port N] [--no-skill]` | Creates `.pm-visual/` in the current folder, picks a free port (from 4317), starts the board, creates the project and installs the agent skill at `.agents/skills/pm-visual/SKILL.md` |
+| `pmv init [--name "..."] [--id x] [--port N] [--no-skill]` | Creates `.pm-visual/` in the current folder, picks a free port (from 4317), starts the board and creates the project. Installs the agent skill into `.claude/skills/pm-visual/` and `.agents/skills/pm-visual/`, unless `--no-skill` or a user-wide copy exists (`~/.claude/skills/pm-visual`, `~/.codex/skills/pm-visual`) |
 | `pmv open [--browser]` | Starts the board in the background if needed and prints the URL |
 | `pmv serve [--port N] [--quiet]` | Runs the board in the foreground (Ctrl-C to stop) |
 | `pmv status` | Is the board running, on which port, and which projects it has |
@@ -22,6 +22,7 @@ Any command that talks to the board starts it first if it isn't running.
 
 | Command | Output |
 |---|---|
+| `pmv brief` | About 12 lines for the start of every session: open owner requests, owner activity since your last read, what waits on the owner, the critical path, what's next, proposals and backlog sync. Advances your inbox cursor |
 | `pmv inbox [--all]` | Open owner requests (change requests, instructions, questions), each with the current state of the element it points at, plus owner activity since your last inbox, pins and unconfirmed requirements |
 | `pmv plan [--limit N]` | Markdown, top-down: owner requests → requirements → phases (with progress and links) → now → work order → critical path → gates → plan check |
 | `pmv outline` | Requirements and the phase/task tree |
@@ -55,6 +56,23 @@ Any command that talks to the board starts it first if it isn't running.
 | `pmv block <id> "<reason>"` | `blocked`, plus a question to the owner with the reason |
 | `pmv status <id> <status>` | Any status: `ready`, `in_progress`, `needs_verification`, `blocked`, `done` |
 
+## Backlog bridge
+
+For repos with a backlog file (`docs/BACKLOG.md` rows like `| BL-102 | Task | … | Status | Impact | Effort | Brief |`,
+any column order; `docs/BACKLOG-done.md` is read too). The board reads the backlog and never writes it.
+
+| Command | Does |
+|---|---|
+| `pmv pull` | Refreshes every mirrored row on the board (status, impact, effort, brief link). Never adds rows |
+| `pmv pull <row-id>... [--match "<regex>"] [--related] [--group <id>] [--file a.md,b.md]` | Lists the rows it would add: the named ones, the ones whose text, keyword or section match, and with `--related` the rows they name. Adds nothing |
+| `pmv pull ... --yes` | Adds them, in `--group` if given. Use it once the owner named or OK'd the rows |
+| `pmv proposals [<id>...]` | Board-only tasks as ingest cards for the backlog owner. A card is ready when its requirements are owner-confirmed and it has no open change request |
+| `pmv adopt <task-id> <row-id>` | After ingest: links the task to its new row and renames it everywhere (links, pins, notes, comments). Refused until the row exists |
+
+A mirrored task keeps its backlog status word (e.g. *Icebox*) on its card. Its status and sizing can't
+be changed on the board; its card title, phase, requirements, dependencies, gate and meta can.
+The backlog file is remembered per project; `--file` changes it.
+
 ## Talking to the owner
 
 | Command | Does |
@@ -87,7 +105,7 @@ A bare task id also works for `ask`/`comment`.
   server.pid                                    (git-ignored)
   cursors/         where each actor's inbox left off   (git-ignored)
   shots/           pmv shot output              (git-ignored)
-.agents/skills/pm-visual/SKILL.md   agent guide installed by init
+.claude/skills/pm-visual/   agent skill installed by init (also .agents/skills/pm-visual/)
 ```
 
 The server listens on 127.0.0.1 only.

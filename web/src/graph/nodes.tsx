@@ -62,16 +62,20 @@ export type TaskNodeData = {
   reqs: ReqDot[];
   /** Phase name, shown when the view mixes phases (critical path, all tasks). */
   context?: string;
+  /** Board-only work on a board that mirrors a backlog: not in the backlog yet. */
+  proposal?: boolean;
 };
 export type TaskNodeType = Node<TaskNodeData, 'task'>;
 
 function TaskNodeView({ data }: NodeProps<TaskNodeType>) {
-  const { task: t, insight: ins, dir, role, dimmed, openQuestions, changes, flash, notes, context } = data;
+  const { task: t, insight: ins, dir, role, dimmed, openQuestions, changes, flash, notes, context, proposal } = data;
   const lr = dir === 'LR';
   useStore((s) => zoomLevel(s.transform[2])); // re-render on zoom level change (CSS does the rest)
   const agentWorking = t.assignee && actorKind(t.assignee) === 'agent' && t.status === 'in_progress';
   const next = ins.rank !== null && ins.rank <= 3;
-  const cls = ['tnode', `st-${t.status}`, ins.critical && 'is-critical', role && `role-${role}`, flash && 'is-flash', changes > 0 && 'has-change']
+  // A backlog row keeps its own status word (e.g. "Icebox") on the card.
+  const status = t.backlog?.status || STATUS_LABEL[t.status];
+  const cls = ['tnode', `st-${t.status}`, ins.critical && 'is-critical', role && `role-${role}`, flash && 'is-flash', changes > 0 && 'has-change', proposal && 'is-proposal']
     .filter(Boolean)
     .join(' ');
 
@@ -83,7 +87,7 @@ function TaskNodeView({ data }: NodeProps<TaskNodeType>) {
           <div className="tnode-far">
             <span className="far-id mono">{t.id}</span>
             <span className="far-title">{t.title}</span>
-            <span className="far-status">{STATUS_LABEL[t.status]}</span>
+            <span className="far-status">{status}</span>
           </div>
           <div className="tnode-near">
             <div className="tnode-head">
@@ -99,9 +103,10 @@ function TaskNodeView({ data }: NodeProps<TaskNodeType>) {
             <div className="tnode-title">{t.title}</div>
             <div className="tnode-status">
               {t.status === 'done' ? <IconCheck size={12} /> : <i className={`sdot s-${t.status}`} />}
-              {STATUS_LABEL[t.status]}
+              {status}
             </div>
           </div>
+          {proposal && <span className="proposal-tag">Proposed</span>}
           {next && <span className="next-tag">Next</span>}
           {agentWorking && (
             <div className="tnode-assignee agent working">

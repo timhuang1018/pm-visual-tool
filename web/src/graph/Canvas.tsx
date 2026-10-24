@@ -198,6 +198,7 @@ export function Canvas(p: CanvasProps) {
             notes: notesFor(ref),
             reqs: p.reqDots(t.requirements),
             context: p.scope === 'critical' ? topName(t.group) : undefined,
+            proposal: !!project.backlog && !t.backlog && t.status !== 'done',
           },
         });
       } else if (n.kind === 'group') {

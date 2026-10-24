@@ -4,6 +4,7 @@
 import { mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { analyze, cycleIfDepends } from '../shared/analysis';
+import { backlogStatus } from '../shared/backlog';
 import { describeRef } from '../shared/describe';
 import { buildStructure, groupChain } from '../shared/structure';
 import {
@@ -83,6 +84,17 @@ export interface NoteInput {
   target?: string;
   tone?: string;
   text?: string;
+}
+/** A backlog row as the CLI sends it (parsed from the repo's backlog file). */
+export interface BacklogRowInput {
+  id: string;
+  title?: string;
+  status: string;
+  impact?: string;
+  effort?: string;
+  brief?: string;
+  keyword?: string;
+  mentions?: string[];
 }
 export interface PlanInput {
   requirements?: RequirementInput[];
@@ -501,6 +513,12 @@ export class Store {
       if (cycle) throw new HttpError(400, `Dependency cycle: ${cycle.join(' → ')}`);
       set('dependsOn', deps, 'waits on');
     }
+    if (t.backlog && (next.status !== t.status || next.impact !== t.impact || next.effort !== t.effort)) {
+      throw new HttpError(
+        409,
+        `${id} mirrors backlog row ${t.backlog.id} (${p.backlog?.files[0] ?? 'the backlog'}): its status and sizing are kept there. Change the row, then \`pmv pull\`.`,
+      );
+    }
     if (next.status === 'done' && t.status !== 'done' && next.gate?.status === 'pending' && isAgent(actor)) {
       throw new HttpError(
         409,
@@ -537,6 +555,94 @@ export class Store {
     t.updatedAt = t.gate.approvedAt!;
     this.emit(p, actor, 'gate.approved', `${id} gate approved: ${t.gate.description}`, `task:${id}`);
     return t;
+  }
+
+  // ---------- backlog mirror ----------
+
+  /**
+   * Mirror backlog rows: refresh the ones already on the board (status, sizing, link) and create
+   * the others as tasks. The caller decides which rows; the board never writes the backlog.
+   */
+  syncBacklog(pid: string, input: { files?: string[]; rows?: BacklogRowInput[]; group?: string | null }, actor: Actor) {
+    const rows = input?.rows;
+    if (!Array.isArray(rows)) throw new HttpError(400, 'Send {files, rows: [{id, status, ...}]}');
+    return this.transact(pid, (p) => {
+      const group = this.checkGroup(p, input.group);
+      const fresh = rows.filter((r) => !p.tasks.some((t) => t.id === r.id));
+      const created = fresh.length
+        ? this.createTasks(
+            pid,
+            fresh.map((r) => ({ id: r.id, title: r.title || r.id, group })),
+            actor,
+          )
+        : [];
+      const changed: string[] = [];
+      for (const r of rows) {
+        const t = this.task(p, r.id);
+        if (!t.backlog && !created.includes(t)) throw new HttpError(409, `${r.id} is already a board task that does not mirror the backlog. Use \`pmv adopt ${r.id} ${r.id}\` to link it.`);
+        const before = t.backlog?.status;
+        this.mirror(p, t, r);
+        if (before !== undefined && before !== t.backlog!.status) changed.push(`${t.id} ${before} → ${t.backlog!.status}`);
+      }
+      p.backlog = { files: input.files?.length ? input.files : (p.backlog?.files ?? []), syncedAt: new Date().toISOString() };
+      if (changed.length) this.emit(p, actor, 'task.updated', `From the backlog: ${changed.join('; ')}`);
+      return { created: created.map((t) => t.id), updated: rows.length - created.length, changed };
+    });
+  }
+
+  /** A proposal was ingested as a backlog row: link it, renaming it to the row id everywhere. */
+  adoptTask(pid: string, id: string, row: BacklogRowInput, actor: Actor): Task {
+    if (!row?.id || !ID_RE.test(row.id)) throw new HttpError(400, 'Send the backlog row {id, status, ...}');
+    return this.transact(pid, (p) => {
+      const t = this.task(p, id);
+      if (t.backlog) throw new HttpError(409, `${id} already mirrors backlog row ${t.backlog.id}`);
+      if (row.id !== id) {
+        if (p.tasks.some((x) => x.id === row.id)) throw new HttpError(409, `${row.id} is already on the board`);
+        this.renameTask(p, id, row.id);
+      }
+      this.mirror(p, t, row);
+      this.emit(p, actor, 'task.updated', `${id === row.id ? id : `${id} → ${row.id}`}: now tracked in the backlog`, `task:${row.id}`);
+      return t;
+    });
+  }
+
+  private mirror(p: Project, t: Task, r: BacklogRowInput) {
+    const status = backlogStatus(r.status ?? '');
+    if (t.status !== 'done' && status === 'done') p.pins = p.pins.filter((x) => x !== t.id);
+    t.status = status;
+    if (r.impact) t.impact = parseSize(r.impact, 'impact');
+    if (r.effort) t.effort = parseSize(r.effort, 'effort');
+    if (status !== 'in_progress') t.assignee = null;
+    t.backlog = {
+      id: r.id,
+      status: String(r.status ?? '').trim(),
+      ...(r.brief ? { brief: String(r.brief) } : {}),
+      ...(r.keyword ? { keyword: String(r.keyword) } : {}),
+      ...(r.mentions?.length ? { mentions: parseList(r.mentions) } : {}),
+    };
+    t.updatedAt = new Date().toISOString();
+  }
+
+  private renameTask(p: Project, from: string, to: string) {
+    const swap = (r: string | null | undefined) => {
+      const x = parseRef(r);
+      if (!x) return r;
+      if (x.type === 'task' && x.id === from) return `task:${to}`;
+      if (x.type === 'link' && (x.id === from || x.to === from)) return `link:${x.id === from ? to : x.id}>${x.to === from ? to : x.to}`;
+      return r;
+    };
+    for (const t of p.tasks) {
+      if (t.id === from) t.id = to;
+      t.dependsOn = t.dependsOn.map((d) => (d === from ? to : d));
+    }
+    p.pins = p.pins.map((x) => (x === from ? to : x));
+    for (const l of p.labels) {
+      if (l.from === from) l.from = to;
+      if (l.to === from) l.to = to;
+    }
+    for (const n of p.notes) n.target = swap(n.target)!;
+    for (const c of p.comments) c.target = swap(c.target) ?? null;
+    for (const e of p.events) e.target = swap(e.target) ?? undefined;
   }
 
   // ---------- comments ----------

@@ -4,6 +4,10 @@
 //   POST   /api/projects                         {id?, name, description?}
 //   GET    /api/projects/:pid                    project + analysis (JSON)
 //   GET    /api/projects/:pid/plan.md            plan written for AI agents (Markdown)
+//   GET    /api/projects/:pid/brief.md?since=N   short session digest (owner activity after event N)
+//   GET    /api/projects/:pid/proposals.md?ids=  board-only tasks as ingest cards for the backlog owner
+//   POST   /api/projects/:pid/backlog            {files, rows, group?} mirror backlog rows (create or refresh)
+//   POST   /api/projects/:pid/tasks/:id/adopt    {backlog row} a proposal became that row (renames it)
 //   POST   /api/projects/:pid/tasks              task object or array of tasks
 //   PATCH  /api/projects/:pid/tasks/:id          partial task
 //   DELETE /api/projects/:pid/tasks/:id
@@ -27,6 +31,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import path from 'node:path';
 import { WebSocketServer, type WebSocket } from 'ws';
+import { renderBrief, renderProposals } from '../shared/briefText';
 import { renderPlan } from '../shared/planText';
 import type { WsMessage } from '../shared/types';
 import { HttpError, Store } from './store';
@@ -81,6 +86,15 @@ export function startServer(opts: ServerOptions): Promise<RunningServer> {
   route('GET', '/api/projects/:pid/plan.md', (_r, { pid }, _b, url) =>
     text(renderPlan(store.view(pid), { limit: Number(url.searchParams.get('limit') ?? 15) })),
   );
+  route('GET', '/api/projects/:pid/brief.md', (_r, { pid }, _b, url) => {
+    const since = url.searchParams.get('since');
+    return text(renderBrief(store.view(pid), { ownerEvents: since === null ? [] : store.inbox(pid, Number(since)).ownerEvents }));
+  });
+  route('GET', '/api/projects/:pid/proposals.md', (_r, { pid }, _b, url) =>
+    text(renderProposals(store.view(pid), url.searchParams.get('ids')?.split(',').filter(Boolean))),
+  );
+  route('POST', '/api/projects/:pid/backlog', (req, { pid }, b) => store.syncBacklog(pid, b ?? {}, actorOf(req, b)));
+  route('POST', '/api/projects/:pid/tasks/:id/adopt', (req, { pid, id }, b) => store.adoptTask(pid, id, b ?? {}, actorOf(req, b)));
   route('POST', '/api/projects/:pid/tasks', (req, { pid }, b) => {
     const list = Array.isArray(b) ? b : Array.isArray(b?.tasks) ? b.tasks : [b];
     return store.createTasks(pid, list, actorOf(req, b));

@@ -47,7 +47,7 @@ describe('sample project', () => {
     expect(v.analysis.cycles).toEqual([]);
     expect(v.analysis.order).toHaveLength(58);
     const warns = v.structure.checks.filter((c) => c.level === 'warn').map((c) => c.code);
-    expect(warns).toEqual(['TASK_UNLINKED']); // T-07, T-53 are deliberately unlinked examples
+    expect(warns).toEqual(['TASK_UNLINKED', 'BOARD_LARGE']); // T-07, T-53 are deliberately unlinked; 58 tasks is past a high-level slice
     const pos = new Map(v.analysis.order.map((id, i) => [id, i]));
     for (const t of v.project.tasks) for (const d of t.dependsOn) expect(pos.get(d)!).toBeLessThan(pos.get(t.id)!);
   });

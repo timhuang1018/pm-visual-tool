@@ -1,11 +1,12 @@
 // Structure: roll tasks up into groups (phases) and requirements, aggregate phase-to-phase
 // links, and check the plan's shape so agents get concrete feedback ("pm check").
 
-import { EFFORT_POINTS, STATUS_REMAINING } from './analysis';
+import { EFFORT_POINTS, STATUS_REMAINING, lineage } from './analysis';
 import type { Analysis, GroupLink, PlanCheck, Project, Rollup, StatusCounts, Structure, Task } from './types';
 import { parseRef } from './types';
 
-export const LIMITS = { phases: 7, itemsPerGroup: 9, depth: 2 };
+/** boardTasks: the board is a high-level slice; past this, detail belongs in briefs or the backlog. */
+export const LIMITS = { phases: 7, itemsPerGroup: 9, depth: 2, boardTasks: 40 };
 
 const EPS = 1e-6;
 
@@ -109,7 +110,8 @@ export function buildStructure(p: Project, a: Analysis): Structure {
   }
   for (const l of links.values()) l.label = p.labels.find((x) => x.from === l.from && x.to === l.to)?.label ?? null;
 
-  const unlinkedTasks = p.requirements.length ? p.tasks.filter((t) => !t.requirements.length).map((t) => t.id) : [];
+  // Mirrored backlog rows are already justified by their brief; only board-only work must trace to a requirement.
+  const unlinkedTasks = p.requirements.length ? p.tasks.filter((t) => !t.requirements.length && !t.backlog).map((t) => t.id) : [];
   const ungroupedTasks = p.groups.length ? p.tasks.filter((t) => !t.group).map((t) => t.id) : [];
 
   const structure: Structure = { groups, requirements, phaseLinks: [...links.values()], unlinkedTasks, ungroupedTasks, checks: [] };
@@ -124,7 +126,7 @@ export function checkPlan(p: Project, a: Analysis, s: Structure): PlanCheck[] {
   const push = (c: PlanCheck) => out.push(c);
   const byId = new Map(p.groups.map((g) => [g.id, g]));
 
-  if (p.tasks.length && !p.requirements.length)
+  if (p.tasks.some((t) => !t.backlog) && !p.requirements.length)
     push({
       level: 'warn',
       code: 'NO_REQUIREMENTS',
@@ -201,6 +203,43 @@ export function checkPlan(p: Project, a: Analysis, s: Structure): PlanCheck[] {
         message: `No owner check-in on the first part of the critical path (${early.join(', ')}). Add a cheap preview or sample gate before expensive work.`,
         fix: `pmv edit ${early[0]} --gate "<what the owner checks>"`,
       });
+  }
+
+  if (p.tasks.length > LIMITS.boardTasks)
+    push({
+      level: 'warn',
+      code: 'BOARD_LARGE',
+      message: `${p.tasks.length} tasks; this board is meant to stay a high-level slice (about ${LIMITS.boardTasks}). Remove finished or unrelated work (the backlog keeps it), or keep detail as subtasks in briefs.`,
+      fix: 'pmv rm <id>',
+    });
+
+  const tasksById = new Map(p.tasks.map((t) => [t.id, t]));
+  for (const t of p.tasks) {
+    if (t.status !== 'done') continue;
+    const open = t.dependsOn.filter((d) => tasksById.get(d) && tasksById.get(d)!.status !== 'done');
+    if (open.length)
+      push({
+        level: 'warn',
+        code: 'DONE_WAITS_ON_OPEN',
+        message: `${t.id} is done but waits on ${open.join(', ')}. For follow-up work, make it wait on ${t.id} instead; if ${t.id} must reopen, that is a backlog decision.`,
+        fix: `pmv edit ${t.id} --deps ${t.dependsOn.filter((d) => !open.includes(d)).join(',') || 'none'} && pmv edit ${open[0]} --deps ${t.id}`,
+        target: `task:${t.id}`,
+      });
+  }
+  // Rows that name each other but have no dependency path either way (direct or through others).
+  for (const t of p.tasks) {
+    const named = (t.backlog?.mentions ?? []).filter((m) => tasksById.has(m));
+    if (!named.length) continue;
+    const { up, down } = lineage(p.tasks, t.id);
+    for (const m of named)
+      if (!up.has(m) && !down.has(m))
+        push({
+          level: 'info',
+          code: 'BACKLOG_MENTION',
+          message: `${t.id}'s backlog row names ${m}, and both are on the board without a link. If one waits on the other, link them.`,
+          fix: `pmv edit ${t.id} --deps ${[...t.dependsOn, m].join(',')}`,
+          target: `task:${t.id}`,
+        });
   }
 
   const drafts = p.requirements.filter((r) => r.status === 'draft');

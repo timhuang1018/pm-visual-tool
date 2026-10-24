@@ -2,20 +2,22 @@
 // and the owner reads in the browser: requirements → phases → tasks, what's critical now,
 // owner gates, questions and change requests.
 //
-//   npx pmv init                 set up .pm-visual/ in this project (board data + agent skill)
-//   npx pmv open                 start the board if needed and print its URL
-//   npx pmv help                 every command
+//   pmv init                     set up .pm-visual/ in this project (board data + agent skill)
+//   pmv open                     start the board if needed and print its URL
+//   pmv help                     every command
 //
 // Environment overrides: PM_URL, PM_PROJECT, PM_ACTOR (default agent:ai), PM_DIR (board folder).
 
 import { spawn, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, openSync, rmSync, copyFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync, openSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { createRequire } from 'node:module';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { matchRows, parseBacklog, type BacklogRow } from '../shared/backlog';
 
-export const VERSION = '1.0.0';
+export const VERSION = '1.1.0';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PORT = 4317;
 
@@ -207,9 +209,10 @@ Set up and view
   pmv shot [overview|critical|all|<group-id>] [--out file.png]   Screenshot a view (needs playwright-core + Chrome)
   pmv demo                          Create a small demo project to try the board
 
-Reading (agents: start every work session with inbox + plan)
+Reading (agents: start every work session with brief)
+  pmv brief                         ~12 lines: owner requests, waiting on owner, critical path, next, proposals
   pmv inbox [--all]                 Owner requests (change requests, instructions, questions) + owner activity
-  pmv plan [--limit N]              Top-down plan: requests, requirements, phases, now, work order, checks
+  pmv plan [--limit N]              Full top-down plan: requests, requirements, phases, now, work order, checks
   pmv outline | pmv check           Structure as a tree / what to fix so the owner can read it
   pmv show <task-id>                One task with analysis and comments (JSON)
   pmv events [--since N] | pmv projects | pmv use <project-id>
@@ -227,12 +230,19 @@ Planning: requirements → phases → tasks
 Working
   pmv start <id> | verify <id> | done <id> | block <id> "<reason>" | status <id> <status>
 
+Backlog bridge (read-only on the backlog file; default docs/BACKLOG.md [+ docs/BACKLOG-done.md])
+  pmv pull                          Refresh the rows already on the board (status, sizing); never adds
+  pmv pull <row-id>... | --match "<regex>" [--related] [--group <id>] [--file a.md,b.md] [--yes]
+                                    Lists the rows it would add; adds them only with --yes
+  pmv proposals [<id>...]           Board-only tasks as ingest cards for the backlog owner
+  pmv adopt <task-id> <row-id>      After ingest: the proposal becomes that row (renamed everywhere)
+
 Talking to the owner
   pmv ask <task-id|element> "<question>"    pmv comment <task-id|element> "<text>"
   pmv reply <C-id> "<text>" [--resolve]     pmv resolve <C-id>      pmv pin <id> [<id>...] (owner)
 
 Elements: task:T-01 group:<id> req:R-1 note:N-1 link:<from>><to> view:overview
-Docs: AGENT guide in .agents/skills/pm-visual/SKILL.md (installed by init)`;
+Docs: the pm-visual agent skill (pmv init installs it unless you have it user-wide)`;
 
 // ---------------------------------------------------------------- commands
 
@@ -293,6 +303,25 @@ async function main() {
   switch (cmd) {
     case 'plan':
       return out(await api('GET', `${P()}/plan.md?limit=${flags.limit ?? 15}`));
+    case 'brief': {
+      const since = readCursor();
+      const box = await api('GET', `${P()}/inbox?since=${since}`);
+      out(await api('GET', `${P()}/brief.md?since=${since}`));
+      writeCursor(box.cursor);
+      return;
+    }
+    case 'proposals':
+      return out(await api('GET', `${P()}/proposals.md${rest.length ? `?ids=${rest.map(encodeURIComponent).join(',')}` : ''}`));
+    case 'pull':
+      return pull();
+    case 'adopt': {
+      const [id, rowId] = [need(rest[0], 'adopt <task-id> <row-id>'), need(rest[1], 'adopt <task-id> <row-id>')];
+      const v = await api('GET', P());
+      const { files, rows } = readBacklog(v.project.backlog?.files);
+      const row = rows.find((r) => r.id === rowId) ?? fail(`${rowId} is not in ${files.join(' + ')} yet. Ingest the proposal first (product-manager), then adopt it.`);
+      await api('POST', `${P()}/tasks/${encodeURIComponent(id)}/adopt`, toInput(row));
+      return console.log(`${id === rowId ? id : `${id} → ${rowId}`}: now mirrors ${row.file} [${row.status}]`);
+    }
     case 'inbox': {
       const since = flags.all ? 0 : readCursor();
       const box = await api('GET', `${P()}/inbox?since=${since}`);
@@ -397,6 +426,69 @@ async function main() {
   }
 }
 
+// ---------------------------------------------------------------- backlog bridge
+
+/** Backlog files, relative to the repo root: the remembered ones, --file, or the defaults. */
+function readBacklog(remembered?: string[]): { files: string[]; rows: BacklogRow[] } {
+  const root = board?.root ?? process.cwd();
+  const files = flags.file
+    ? flags.file.split(',').map((f) => path.relative(root, path.resolve(f)))
+    : remembered?.length
+      ? remembered
+      : ['docs/BACKLOG.md', 'docs/BACKLOG-done.md', 'BACKLOG.md'].filter((f) => existsSync(path.join(root, f)));
+  if (!files.length) fail('no backlog file found (looked for docs/BACKLOG.md); pass --file <path>');
+  const rows = files.flatMap((f) => {
+    const abs = path.join(root, f);
+    if (!existsSync(abs)) fail(`backlog file ${f} not found`);
+    return parseBacklog(readFileSync(abs, 'utf8'), f);
+  });
+  return { files, rows };
+}
+
+const toInput = (r: BacklogRow) => ({ id: r.id, title: r.title, status: r.status, impact: r.impact, effort: r.effort, brief: r.brief, keyword: r.keyword, mentions: r.mentions });
+const rowLine = (r: BacklogRow) => `  ${r.id} [${r.status}] ${r.title}${r.section ? ` · ${r.section}` : ''}`;
+
+/**
+ * Mirror backlog rows onto the board. Always refreshes the rows already there; adds new rows only
+ * when they are named or matched, and only with --yes, so a board never fills up with unrelated work.
+ */
+async function pull() {
+  const v = await api('GET', P());
+  const { files, rows } = readBacklog(v.project.backlog?.files);
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const mirrored: string[] = v.project.tasks.filter((t: any) => t.backlog).map((t: any) => t.id);
+  const onBoard = new Set<string>(v.project.tasks.map((t: any) => t.id));
+
+  const picked = new Map<string, BacklogRow>();
+  const unknown: string[] = [];
+  for (const id of rest) byId.has(id) ? picked.set(id, byId.get(id)!) : unknown.push(id);
+  if (flags.match) for (const r of matchRows(rows, flags.match)) picked.set(r.id, r);
+  const named = (src: BacklogRow[]) => [...new Set(src.flatMap((r) => r.mentions))].filter((m) => byId.has(m) && !onBoard.has(m) && !picked.has(m));
+  const base = picked.size || flags.match ? [...picked.values()] : mirrored.map((id) => byId.get(id)!).filter(Boolean);
+  if (flags.related) for (const m of named(base)) picked.set(m, byId.get(m)!);
+  for (const id of onBoard) picked.delete(id);
+  if (unknown.length) fail(`not in ${files.join(' + ')}: ${unknown.join(', ')}`);
+
+  const refresh = mirrored.map((id) => byId.get(id)).filter((r): r is BacklogRow => !!r);
+  const add = flags.yes ? [...picked.values()] : [];
+  console.log(`backlog: ${files.join(' + ')} (${rows.length} rows)`);
+  if (refresh.length || add.length || !v.project.backlog) {
+    const r = await api('POST', `${P()}/backlog`, { files, rows: [...refresh, ...add].map(toInput), group: flags.group });
+    if (refresh.length) console.log(`refreshed ${refresh.length} rows on the board${r.changed.length ? `; changed: ${r.changed.join('; ')}` : ''}`);
+    if (r.created.length) console.log(`added ${r.created.length}: ${r.created.join(', ')}${flags.group ? ` (phase ${flags.group})` : ' (no phase yet: pmv edit <id> --group <id>)'}`);
+  }
+  const gone = mirrored.filter((id) => !byId.has(id));
+  if (gone.length) console.log(`gone from the backlog: ${gone.join(', ')} (pmv rm <id> if the row was removed)`);
+  if (picked.size && !flags.yes) {
+    const list = [...picked.values()];
+    console.log(`would add ${list.length} row${list.length === 1 ? '' : 's'}. Show this list to the owner; add with --yes once they agree:`);
+    for (const r of list.slice(0, 25)) console.log(rowLine(r));
+    if (list.length > 25) console.log(`  +${list.length - 25} more; narrow --match or name the rows`);
+  } else if (!picked.size && (rest.length || flags.match)) console.log('nothing new to add');
+  const mentioned = named([...refresh, ...add]);
+  if (mentioned.length) console.log(`named by these rows but not on the board: ${mentioned.slice(0, 12).join(', ')}${mentioned.length > 12 ? ' …' : ''} (pmv pull --related lists them)`);
+}
+
 async function setStatus(id: string, status: string | undefined) {
   await needProject();
   const s = need(status, 'status <id> <ready|in_progress|needs_verification|blocked|done>');
@@ -435,18 +527,24 @@ async function init() {
   await new Promise((r) => res.on('exit', r));
 
   if (!flags['no-skill']) {
-    const src = [path.join(HERE, '..', 'agent', 'SKILL.md'), path.join(HERE, 'agent', 'SKILL.md')].find(existsSync);
-    if (src) {
-      const dest = path.join(root, '.agents', 'skills', 'pm-visual', 'SKILL.md');
-      mkdirSync(path.dirname(dest), { recursive: true });
-      copyFileSync(src, dest);
-      console.log(`installed agent skill: ${path.relative(root, dest)}`);
-    }
+    // A user-scope copy (e.g. from skill-repo) already serves every project; don't add a second one.
+    const user = ['.claude', '.codex'].map((d) => path.join(homedir(), d, 'skills', 'pm-visual', 'SKILL.md')).find(existsSync);
+    const src = [path.join(HERE, '..', 'agent', 'pm-visual'), path.join(HERE, 'agent', 'pm-visual')].find((d) => existsSync(path.join(d, 'SKILL.md')));
+    if (user) console.log(`agent skill: using ${user}`);
+    else if (src)
+      for (const d of ['.claude', '.agents']) {
+        const dest = path.join(root, d, 'skills', 'pm-visual');
+        cpSync(src, dest, { recursive: true });
+        console.log(`installed agent skill: ${path.relative(root, dest)}/`);
+      }
   }
+  const gi = path.join(root, '.gitignore');
+  if (existsSync(gi) && !readFileSync(gi, 'utf8').includes('.pm-visual'))
+    console.log('Board data lives in .pm-visual/data/. If the board is only a view of your backlog, add .pm-visual/ to .gitignore.');
   console.log(`
 Board: http://127.0.0.1:${port}/#/${id}   (pmv open --browser)
-Next, for the agent: read .agents/skills/pm-visual/SKILL.md, write plan.json from the owner's request,
-then: pmv import plan.json && pmv check`);
+Next, for the agent: follow the pm-visual skill. Write plan.json from the owner's request, or pmv pull rows
+from the backlog, then: pmv import plan.json && pmv check`);
 }
 
 async function serve() {

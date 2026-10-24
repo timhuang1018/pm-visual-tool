@@ -90,6 +90,22 @@ export interface Note {
   createdBy: Actor;
 }
 
+/**
+ * A task that mirrors a row of the repo's backlog file (e.g. docs/BACKLOG.md). The row is the
+ * source of truth for status and sizing; the board adds phases, links and requirements around it.
+ */
+export interface BacklogLink {
+  /** Row id, normally the task id too (e.g. BL-102). */
+  id: string;
+  /** Status exactly as written in the row ("Icebox", "Needs verification"). */
+  status: string;
+  /** First link in the row's brief/record cell. */
+  brief?: string;
+  keyword?: string;
+  /** Other row ids the row's text names ("waits on BL-104"). */
+  mentions?: string[];
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -108,6 +124,8 @@ export interface Task {
   /** Who is currently working on it, e.g. "agent:claude". */
   assignee: Actor | null;
   meta?: Meta;
+  /** Set when the task mirrors a backlog row; unset = board-only (a proposal when a backlog is linked). */
+  backlog?: BacklogLink;
   createdBy: Actor;
   createdAt: string;
   updatedAt: string;
@@ -160,6 +178,8 @@ export interface Project extends ProjectMeta {
   comments: Comment[];
   /** Owner priority order: task ids to do first, in order. */
   pins: string[];
+  /** The backlog this board mirrors rows from (paths relative to the repo root). */
+  backlog?: { files: string[]; syncedAt: string };
   events: PmEvent[];
   seq: number;
 }
