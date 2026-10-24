@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.1 — 2026-10-24
+
+- Install from the release tarball: `npm i -g https://github.com/timhuang1018/pm-visual-tool/releases/download/v1.1.1/pm-visual-1.1.1.tgz`.
+  A global install from git (`npm i -g github:…`) fails to build because npm leaks `-g` into the prepare step.
+
 ## 1.1.0 — 2026-10-24
 
 ### Backlog bridge
@@ -21,7 +26,7 @@
 - The agent skill moved to `agent/pm-visual/` (SKILL.md plus `references/plan-format.md`, read on demand). Its trigger is narrowed to explicit requests to see or steer work visually.
 - `pmv init` installs the skill where Claude Code and Codex read it (`.claude/skills/`, `.agents/skills/`). It skips the install when a user-wide copy exists.
 - The skill is experimental and project-scoped (`scope: project`): it's installed per repo, never user-wide.
-- Install globally (`npm i -g github:timhuang1018/pm-visual-tool#v1.1.0`), so no `package.json` changes.
+- Install globally, so no `package.json` changes (see 1.1.1 for the working install line).
 
 ## 1.0.0 — 2026-10-22
 

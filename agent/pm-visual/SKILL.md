@@ -24,7 +24,7 @@ read-only and stages new work as **proposals** until the backlog owner ingests t
 ## Set up (once per repo)
 
 ```sh
-command -v pmv || npm i -g github:timhuang1018/pm-visual-tool#v1.1.0
+command -v pmv || npm i -g https://github.com/timhuang1018/pm-visual-tool/releases/download/v1.1.1/pm-visual-1.1.1.tgz
 pmv init --no-skill --name "<area>"   # repo root; you already have this skill
 pmv open                              # board URL: give it to the user
 ```

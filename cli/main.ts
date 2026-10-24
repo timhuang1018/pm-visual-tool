@@ -17,7 +17,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { matchRows, parseBacklog, type BacklogRow } from '../shared/backlog';
 
-export const VERSION = '1.1.0';
+export const VERSION = '1.1.1';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PORT = 4317;
 

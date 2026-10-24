@@ -1,6 +1,6 @@
 {
   "name": "pm-visual",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "A lightweight visual task board that AI agents drive from the command line and owners read and steer in the browser: requirements → phases → tasks, critical path, owner gates and change requests.",
   "private": true,
   "type": "module",

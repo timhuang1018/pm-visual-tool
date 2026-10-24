@@ -23,8 +23,9 @@ installs into host projects and skill-repo publishes as an experimental, project
    [ux-walkthrough](.agents/skills/ux-walkthrough/SKILL.md) heuristics before handing over. If you added
    behaviour, add or extend a scenario in `tests/ux/scenarios.mjs`.
 5. **Releases**: bump `version` in `package.json` and `VERSION` in `cli/main.ts`, add a `CHANGELOG.md` entry, run
-   `npm run build`, and test `npm pack` in a scratch project (see docs/development.md). Update the pinned tag in
-   the skill's install line, push the git tag, then publish the skill:
+   `npm run build`, and test `npm pack` in a scratch project (see docs/development.md). Update the release URL in
+   the skill's and README's install line, push the git tag, attach the tarball
+   (`gh release create v<x> pm-visual-<x>.tgz --repo timhuang1018/pm-visual-tool`), then publish the skill:
    `skill-sync push pm-visual --source agent/pm-visual --yes` (after the skill-repo freshness check).
 
 ## Using the board while developing

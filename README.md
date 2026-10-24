@@ -26,7 +26,8 @@ element to request a change. The agent picks it all up through its CLI.
 In any project:
 
 ```sh
-npm i -g github:timhuang1018/pm-visual-tool#v1.1.0   # the `pmv` CLI (runtime dependency: ws); no package.json changes
+npm i -g https://github.com/timhuang1018/pm-visual-tool/releases/download/v1.1.1/pm-visual-1.1.1.tgz
+                                                     # the `pmv` CLI (runtime dependency: ws); no package.json changes
 pmv init                                             # creates .pm-visual/, starts the board, installs the agent skill
 pmv open --browser                                   # opens http://127.0.0.1:<port>/#/<project>
 ```

@@ -33,7 +33,8 @@ npm run build      # type-check + dist/ui + dist/cli.js
 - `npm run build:pkg` builds the UI with Vite into `dist/ui` and bundles the CLI and server with
   esbuild into a single `dist/cli.js`. The only runtime dependency is `ws`; React and React Flow are
   bundled into the UI.
-- `prepare` runs `build:pkg`, so `npm i -g github:timhuang1018/pm-visual-tool#<tag>` builds on install.
+- `prepare` runs `build:pkg`, so a local git install (`npm i -D github:…`) builds on install. Global git installs
+  don't build (npm leaks `-g` into prepare), so each release attaches the `npm pack` tarball and users install that.
 - To check a release locally:
 
   ```sh
