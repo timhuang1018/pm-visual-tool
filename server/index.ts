@@ -12,7 +12,9 @@ const port = Number(process.env.PORT ?? 4317);
 const dataDir = process.env.PM_DATA_DIR ?? path.join(ROOT, 'data');
 const ui = path.join(ROOT, 'dist', 'ui');
 
-const s = await startServer({ port, dataDir, uiDir: existsSync(ui) ? ui : null, seedSample: process.env.PM_SEED_SAMPLE !== '0' });
+// Backlog and brief paths are relative to this folder (the CLI's working folder when it linked them).
+const root = process.env.PM_ROOT ?? ROOT;
+const s = await startServer({ port, dataDir, uiDir: existsSync(ui) ? ui : null, seedSample: process.env.PM_SEED_SAMPLE !== '0', root });
 console.log(`pm-visual API on ${s.url}  (data: ${path.relative(ROOT, dataDir) || dataDir})`);
 
 const shutdown = () => s.close().then(() => process.exit(0));

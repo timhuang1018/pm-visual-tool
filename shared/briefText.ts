@@ -7,10 +7,10 @@
 import { describeRef } from './describe';
 import { computeNow } from './now';
 import type { PmEvent, ProjectView, Task } from './types';
-import { STATUS_LABEL } from './types';
+import { STATUS_LABEL, isSynced, statusWord } from './types';
 
 const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
-const st = (t: Task) => t.backlog?.status || STATUS_LABEL[t.status];
+const st = (t: Task) => statusWord(t);
 
 /** The chain, shortened in the middle when long: first 3 … last 2. */
 function chain(ids: string[], label: (id: string) => string): string {
@@ -19,7 +19,7 @@ function chain(ids: string[], label: (id: string) => string): string {
 }
 
 export function proposalsOf(view: ProjectView): Task[] {
-  return view.project.tasks.filter((t) => !t.backlog && t.status !== 'done');
+  return view.project.tasks.filter((t) => !isSynced(t) && t.status !== 'done');
 }
 
 /** What still stands between a proposal and ingest ([] = ready): unconfirmed requirements, open change requests. */
@@ -75,8 +75,14 @@ export function renderBrief(view: ProjectView, opts: { ownerEvents?: PmEvent[]; 
     const props = proposalsOf(view);
     const ready = props.filter((t) => !proposalWaits(view, t).length);
     const mirrored = p.tasks.filter((t) => t.backlog).length;
-    if (props.length) L.push(`Proposals (not in the backlog yet): ${props.map((t) => t.id).join(', ')}; ${ready.length} ready to ingest (pmv proposals)`);
-    L.push(`Backlog: ${mirrored} rows mirrored from ${p.backlog.files.join(' + ')}, synced ${p.backlog.syncedAt.slice(0, 16).replace('T', ' ')} UTC`);
+    const subs = p.tasks.filter((t) => t.subtask).length;
+    const rows = (p.backlog.subtasks ?? []).map((x) => x.row);
+    if (props.length) L.push(`Proposals (not in the backlog or a brief yet): ${props.map((t) => t.id).join(', ')}; ${ready.length} ready to ingest (pmv proposals)`);
+    L.push(
+      `Backlog: ${mirrored} rows mirrored from ${p.backlog.files.join(' + ')}${rows.length ? `, ${subs} subtasks from the briefs of ${rows.join(', ')}` : ''}, synced ${p.backlog.syncedAt.slice(0, 16).replace('T', ' ')} UTC` +
+        `${p.backlog.problems?.length ? ` · ${p.backlog.problems.length} sync problem(s) (pmv check)` : ''}`,
+    );
+    if (subs) L.push('Subtask status comes from the briefs: update the Subtasks table (and Progress), not the board.');
   }
   const warns = s.checks.filter((c) => c.level !== 'info').length;
   L.push(`Plan check: ${warns ? `${warns} warning(s) (pmv check)` : 'clean'} · cursor #${p.seq}`);

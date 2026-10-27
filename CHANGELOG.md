@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2.0 — 2026-10-27
+
+### Subtasks from briefs, and a board that keeps itself current
+- A backlog item's steps live in its brief as a `## Subtasks` table (`| ID | Title | Status | Depends on | Estimate | Gate |`),
+  the one format the product-manager skill writes and the board reads. `pmv subtasks add <row>` shows a row's table.
+- The server re-reads the backlog and tracked briefs on every page load, agent read (`brief`, `plan`, `check`, `show`),
+  `pmv pull` and file change (it watches their folders). Agents only edit the PM's documents; no `pmv done`/`start`/`edit`
+  for synced items.
+- The table owns a subtask's title, status, size, estimate, waits-on and gate wording; the server refuses those edits.
+  The board keeps the phase, requirements, comments, pins and the owner's gate approval (kept while the wording stays).
+- New subtasks are placed next to their siblings, else in a phase made for the row. Cross-brief waits-on: `BL-381.C4`.
+- Board-only cards on a linked board are tagged *Not synced* (was *Proposed*).
+- New plan checks: `NOT_SYNCED`, `SUBTASKS_PENDING`, `SYNC_PROBLEM` (bad data never fails a sync), `GATE_SKIPPED`.
+  `BOARD_LARGE` no longer counts brief subtasks.
+- Migration: `pmv subtasks export [<row> [<task>...]]...` prints the Subtasks table for existing board-only cards
+  (`--write` puts it in the brief). Once the brief lists them, the cards keep their ids, comments and approvals.
+- `pmv pull` without ids is now the same server-side sync; `POST /sync`, `POST /subtasks`, `DELETE /subtasks/:row`.
+
 ## 1.1.1 — 2026-10-24
 
 - Install from the release tarball: `npm i -g https://github.com/timhuang1018/pm-visual-tool/releases/download/v1.1.1/pm-visual-1.1.1.tgz`.

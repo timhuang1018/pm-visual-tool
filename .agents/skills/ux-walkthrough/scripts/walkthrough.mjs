@@ -120,6 +120,10 @@ async function runStep(page, s, ctx) {
       await page.goto(new URL(s.path ?? '/', spec.baseUrl).href);
       if (s.waitFor) await page.waitForSelector(s.waitFor, { timeout: 15000 });
       return 'ok';
+    case 'reload':
+      await page.reload();
+      if (s.waitFor) await page.waitForSelector(s.waitFor, { timeout: 15000 });
+      return 'ok';
     case 'click':
       ctx.clicks++;
       await locate(page, s).click({ timeout: t, force: s.force });

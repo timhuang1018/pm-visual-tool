@@ -15,9 +15,10 @@ import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { matchRows, parseBacklog, type BacklogRow } from '../shared/backlog';
+import { briefPath, matchRows, parseBacklog, parseSubtasks, renderSubtasks, writeSubtasks, type BacklogRow } from '../shared/backlog';
+import { exportSubtasks, guessRows } from '../shared/subtasks';
 
-export const VERSION = '1.1.1';
+export const VERSION = '1.2.0';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PORT = 4317;
 
@@ -92,7 +93,7 @@ function uiDir(): string | null {
   return null;
 }
 
-async function health(): Promise<{ ok: boolean; dataDir: string; pid: number } | null> {
+async function health(): Promise<{ ok: boolean; dataDir: string; pid: number; version?: string | null } | null> {
   try {
     const r = await fetch(`${BASE}/api/health`);
     return r.ok ? await r.json() : null;
@@ -125,7 +126,25 @@ async function ensureServer(): Promise<void> {
   fail(`the board did not start; see ${path.join(board.dir, 'server.log')}`);
 }
 
+let versionChecked = false;
+/** This project's board runs another pmv version (e.g. after an upgrade): restart it on this one. */
+async function matchVersion() {
+  if (versionChecked || !board || flags.url || process.env.PM_URL) return;
+  versionChecked = true;
+  const h = await health();
+  if (!h || h.version === VERSION || path.resolve(h.dataDir) !== path.resolve(path.join(board.dir, 'data'))) return;
+  console.error(`pmv: restarting the board (it ran ${h.version ?? 'an older version'}, this is ${VERSION})`);
+  try {
+    process.kill(h.pid, 'SIGTERM');
+  } catch {
+    return;
+  }
+  for (let i = 0; i < 40 && (await health()); i++) await new Promise((r) => setTimeout(r, 100));
+  await ensureServer();
+}
+
 async function api(method: string, url: string, body?: unknown): Promise<any> {
+  await matchVersion();
   const call = () =>
     fetch(BASE + url, {
       method,
@@ -231,9 +250,16 @@ Working
   pmv start <id> | verify <id> | done <id> | block <id> "<reason>" | status <id> <status>
 
 Backlog bridge (read-only on the backlog file; default docs/BACKLOG.md [+ docs/BACKLOG-done.md])
-  pmv pull                          Refresh the rows already on the board (status, sizing); never adds
+  The board re-reads the backlog and tracked briefs on every page load, read and file change.
+  pmv pull                          Re-read now: rows on the board + tracked briefs' subtasks; never adds rows
   pmv pull <row-id>... | --match "<regex>" [--related] [--group <id>] [--file a.md,b.md] [--yes]
                                     Lists the rows it would add; adds them only with --yes
+  pmv subtasks                      Tracked rows, their subtasks and what the sync could not read
+  pmv subtasks add <row-id>... [--group <id>]   Show these rows' brief "## Subtasks" tables on the board
+  pmv subtasks rm <row-id>          Stop showing a row's subtasks (cards leave; the brief keeps them)
+  pmv subtasks export [<row-id> [<task-id>...]]... [--group a,b] [--write] [--dry-run]
+                                    Board-only cards → a Subtasks table for each row's brief (prints it;
+                                    --write puts it in the brief). The cards join the table once it lands.
   pmv proposals [<id>...]           Board-only tasks as ingest cards for the backlog owner
   pmv adopt <task-id> <row-id>      After ingest: the proposal becomes that row (renamed everywhere)
 
@@ -314,6 +340,8 @@ async function main() {
       return out(await api('GET', `${P()}/proposals.md${rest.length ? `?ids=${rest.map(encodeURIComponent).join(',')}` : ''}`));
     case 'pull':
       return pull();
+    case 'subtasks':
+      return subtasksCmd();
     case 'adopt': {
       const [id, rowId] = [need(rest[0], 'adopt <task-id> <row-id>'), need(rest[1], 'adopt <task-id> <row-id>')];
       const v = await api('GET', P());
@@ -469,24 +497,145 @@ async function pull() {
   for (const id of onBoard) picked.delete(id);
   if (unknown.length) fail(`not in ${files.join(' + ')}: ${unknown.join(', ')}`);
 
-  const refresh = mirrored.map((id) => byId.get(id)).filter((r): r is BacklogRow => !!r);
   const add = flags.yes ? [...picked.values()] : [];
   console.log(`backlog: ${files.join(' + ')} (${rows.length} rows)`);
-  if (refresh.length || add.length || !v.project.backlog) {
-    const r = await api('POST', `${P()}/backlog`, { files, rows: [...refresh, ...add].map(toInput), group: flags.group });
-    if (refresh.length) console.log(`refreshed ${refresh.length} rows on the board${r.changed.length ? `; changed: ${r.changed.join('; ')}` : ''}`);
+  if (add.length || !v.project.backlog) {
+    const r = await api('POST', `${P()}/backlog`, { files, rows: add.map(toInput), group: flags.group });
     if (r.created.length) console.log(`added ${r.created.length}: ${r.created.join(', ')}${flags.group ? ` (phase ${flags.group})` : ' (no phase yet: pmv edit <id> --group <id>)'}`);
   }
-  const gone = mirrored.filter((id) => !byId.has(id));
-  if (gone.length) console.log(`gone from the backlog: ${gone.join(', ')} (pmv rm <id> if the row was removed)`);
+  await syncNow(mirrored.length);
   if (picked.size && !flags.yes) {
     const list = [...picked.values()];
     console.log(`would add ${list.length} row${list.length === 1 ? '' : 's'}. Show this list to the owner; add with --yes once they agree:`);
     for (const r of list.slice(0, 25)) console.log(rowLine(r));
     if (list.length > 25) console.log(`  +${list.length - 25} more; narrow --match or name the rows`);
   } else if (!picked.size && (rest.length || flags.match)) console.log('nothing new to add');
+  const refresh = mirrored.map((id) => byId.get(id)).filter((r): r is BacklogRow => !!r);
   const mentioned = named([...refresh, ...add]);
   if (mentioned.length) console.log(`named by these rows but not on the board: ${mentioned.slice(0, 12).join(', ')}${mentioned.length > 12 ? ' …' : ''} (pmv pull --related lists them)`);
+}
+
+/** Ask the board to re-read the documents now, and say what changed. */
+async function syncNow(rowsOnBoard?: number) {
+  const r = await api('POST', `${P()}/sync`);
+  const v = await api('GET', P());
+  const subs = v.project.tasks.filter((t: any) => t.subtask).length;
+  const tracked = (v.project.backlog?.subtasks ?? []).map((s: any) => s.row);
+  console.log(
+    `synced: ${rowsOnBoard ?? v.project.tasks.filter((t: any) => t.backlog).length} rows${tracked.length ? `, ${subs} subtasks from ${tracked.join(', ')}` : ''}` +
+      `${r.created?.length ? `; new ${r.created.join(', ')}` : ''}${r.adopted?.length ? `; joined their brief: ${r.adopted.join(', ')}` : ''}`,
+  );
+  if (r.changed?.length) console.log(`changed: ${r.changed.join('; ')}`);
+  for (const x of r.problems ?? []) console.log(`  ! ${x}`);
+  return r;
+}
+
+async function subtasksCmd() {
+  const [sub, ...ids] = rest;
+  const v = await api('GET', P());
+  const { files, rows } = readBacklog(v.project.backlog?.files);
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const root = board?.root ?? process.cwd();
+  const row = (id: string) => byId.get(id) ?? fail(`${id} is not in ${files.join(' + ')}`);
+
+  if (sub === 'add') {
+    if (!ids.length) fail('usage: pmv subtasks add <row-id>... [--group <id>]');
+    for (const id of ids) {
+      const b = briefPath(row(id));
+      if (!b) console.log(`  ! ${id}'s row links no brief; its subtasks show once it does`);
+      else if (!existsSync(path.join(root, b)) || !parseSubtasks(readFileSync(path.join(root, b), 'utf8')).found)
+        console.log(`  ! ${b} has no "## Subtasks" table yet; the cards appear when the PM writes it`);
+    }
+    await api('POST', `${P()}/subtasks`, { files, rows: ids.map((r) => ({ row: r, ...(flags.group ? { group: flags.group } : {}) })) });
+    console.log(`showing subtasks of ${ids.join(', ')}`);
+    await syncNow();
+    return;
+  }
+  if (sub === 'rm') {
+    const r = await api('DELETE', `${P()}/subtasks/${encodeURIComponent(need(ids[0], 'subtasks rm <row-id>'))}`);
+    return console.log(`stopped showing ${ids[0]}'s subtasks${r.removed.length ? `; removed ${r.removed.join(', ')}` : ''}`);
+  }
+  if (sub === 'export') return exportCmd(v.project, ids, { files, byId, root });
+  if (sub) fail('usage: pmv subtasks [add <row-id>... | rm <row-id> | export [<row-id> [<task-id>...]]]');
+
+  const tracked = v.project.backlog?.subtasks ?? [];
+  if (!tracked.length) console.log('no subtasks shown yet: pmv subtasks add <row-id>');
+  for (const t of tracked) {
+    const list = v.project.tasks.filter((x: any) => x.subtask?.row === t.row);
+    const counts = list.reduce((m: Record<string, number>, x: any) => ((m[x.subtask.status || '—'] = (m[x.subtask.status || '—'] ?? 0) + 1), m), {});
+    const r = byId.get(t.row);
+    console.log(`${t.row} ${r ? `"${r.title}" ` : ''}— ${list.length} subtasks (${Object.entries(counts).map(([k, n]) => `${n} ${k}`).join(', ') || 'none yet'})${r && briefPath(r) ? ` · ${briefPath(r)}` : ''}`);
+  }
+  const claims = Object.entries(v.project.backlog?.claims ?? {});
+  if (claims.length) console.log(`waiting for their brief's table: ${claims.map(([id, r]) => `${id}→${r}`).join(', ')}`);
+  const loose = v.project.tasks.filter((x: any) => !x.subtask && !x.backlog).map((x: any) => x.id);
+  if (v.project.backlog && loose.length) console.log(`not synced (board-only): ${loose.join(', ')} — pmv subtasks export`);
+  for (const x of v.project.backlog?.problems ?? []) console.log(`  ! ${x}`);
+}
+
+/** Board-only cards → Subtasks tables; records which row each card belongs to unless --dry-run. */
+async function exportCmd(project: any, ids: string[], ctx: { files: string[]; byId: Map<string, BacklogRow>; root: string }) {
+  const tasks = new Map<string, any>(project.tasks.map((t: any) => [t.id, t]));
+  const plans: { row: string; ids: string[] }[] = [];
+  let unassigned: string[] = [];
+  if (ids.length) {
+    // ROW [task...] [ROW [task...]]...: a token that is a backlog row starts the next row's list.
+    for (const tok of ids) {
+      if (ctx.byId.has(tok)) plans.push({ row: tok, ids: [] });
+      else if (!plans.length) fail(`${tok} is not in ${ctx.files.join(' + ')}; start with a row id: pmv subtasks export <row-id> [<task-id>...]`);
+      else plans[plans.length - 1].ids.push(tok);
+    }
+    const groups = flags.group ? flags.group.split(',') : [];
+    for (const plan of plans) {
+      if (!plan.ids.length)
+        plan.ids = groups.length && plans.length === 1
+          ? project.tasks.filter((t: any) => groups.includes(t.group) && !t.subtask && !t.backlog).map((t: any) => t.id)
+          : (guessRows(project, (r) => r === plan.row).get(plan.row) ?? []).map((t) => t.id);
+      if (!plan.ids.length) fail(`no board-only cards for ${plan.row}: name them (pmv subtasks export ${plan.row} T1 T2 ...) or pass --group <id>`);
+      for (const id of plan.ids) {
+        const t = tasks.get(id) ?? fail(`no task ${id}`);
+        if (t.subtask || t.backlog) fail(`${id} is already synced (${t.subtask ? `${t.subtask.row}'s subtask ${t.subtask.id}` : `row ${t.backlog.id}`})`);
+      }
+    }
+  } else {
+    const guess = guessRows(project, (r) => ctx.byId.has(r));
+    for (const [row, list] of guess) if (row) plans.push({ row, ids: list.map((t) => t.id) });
+    unassigned = (guess.get(null) ?? []).filter((t) => !project.backlog?.claims?.[t.id]).map((t) => t.id);
+    if (!plans.length && !unassigned.length) return console.log('every card on this board is synced or waiting for its brief');
+  }
+  const rowOf = (id: string) => plans.find((pl) => pl.ids.includes(id))?.row ?? project.backlog?.claims?.[id];
+
+  for (const plan of plans) {
+    const r = ctx.byId.get(plan.row)!;
+    const brief = briefPath(r);
+    const { items, loose } = exportSubtasks(project, plan.ids, plan.row, rowOf);
+    const table = renderSubtasks(items);
+    console.log(`\n## ${plan.row} "${r.title}" → ${brief ?? '(its row links no brief yet)'}\n`);
+    if (flags.write && brief && !flags['dry-run']) {
+      const abs = path.join(ctx.root, brief);
+      if (!existsSync(abs)) fail(`brief ${brief} not found`);
+      writeFileSync(abs, writeSubtasks(readFileSync(abs, 'utf8'), table));
+      console.log(`wrote the Subtasks table into ${brief}`);
+    } else {
+      console.log('## Subtasks\n');
+      console.log(table);
+    }
+    if (loose.length) console.log(`\n(waits on board-only ${loose.join(', ')}: export those too, or they show as text)`);
+  }
+  if (unassigned.length)
+    console.log(`\nNames no backlog row: ${unassigned.join(', ')}\n  → pmv subtasks export <row-id> <task-id>...   (or --group <id>)`);
+  if (flags['dry-run'] || !plans.length) return;
+  // Each card joins its row's table when the brief lists its id; nothing changes on the board until then.
+  const groupOf = (list: string[]) => {
+    const c = new Map<string, number>();
+    for (const id of list) if (tasks.get(id)?.group) c.set(tasks.get(id).group, (c.get(tasks.get(id).group) ?? 0) + 1);
+    return [...c].sort((a, b) => b[1] - a[1])[0]?.[0];
+  };
+  await api('POST', `${P()}/subtasks`, { files: ctx.files, rows: plans.map((pl) => ({ row: pl.row, claim: pl.ids, ...(groupOf(pl.ids) ? { group: groupOf(pl.ids) } : {}) })) });
+  console.log(
+    `\nBoard: ${plans.map((pl) => `${pl.ids.length} cards → ${pl.row}`).join(', ')}. They keep their ids, comments and approvals and follow the brief once its table lists them${flags.write ? '' : ' (paste the table under "## Subtasks" in the brief)'}; the board picks it up on the next page load.`,
+  );
+  if (flags.write) await syncNow();
 }
 
 async function setStatus(id: string, status: string | undefined) {
@@ -551,7 +700,7 @@ async function serve() {
   const dir = board?.dir ?? fail('no .pm-visual here; run pmv init');
   const port = Number(flags.port ?? board!.config.port);
   const { startServer } = await import('../server/app');
-  const s = await startServer({ port, dataDir: path.join(dir, 'data'), uiDir: uiDir() }).catch((e: Error) => fail(`cannot start on port ${port}: ${e.message}`));
+  const s = await startServer({ port, dataDir: path.join(dir, 'data'), uiDir: uiDir(), root: board!.root, version: VERSION }).catch((e: Error) => fail(`cannot start on port ${port}: ${e.message}`));
   writeFileSync(path.join(dir, 'server.pid'), String(process.pid));
   if (!flags.quiet) console.log(`PM Visual board on ${s.url}/#/${board!.config.project}  (Ctrl-C to stop)`);
   const stop = () =>

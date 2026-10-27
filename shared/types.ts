@@ -106,6 +106,25 @@ export interface BacklogLink {
   mentions?: string[];
 }
 
+/**
+ * A task that is one row of a backlog item's `## Subtasks` table, in that item's brief. The table is
+ * the source of truth for title, status, sizing, waits-on and gate wording; the board keeps the
+ * placement, requirements, comments and the owner's gate approval.
+ */
+export interface SubtaskLink {
+  /** Backlog row whose brief lists it, e.g. BL-381. */
+  row: string;
+  /** Id in the table, e.g. T1 (the task id too, unless another task already had it). */
+  id: string;
+  /** Status exactly as written in the table. */
+  status: string;
+  /** The brief, relative to the repo root. */
+  brief: string;
+  estimate?: string;
+  /** Waits-on entries this board cannot draw (rows or tasks not on it). */
+  after?: string[];
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -126,6 +145,8 @@ export interface Task {
   meta?: Meta;
   /** Set when the task mirrors a backlog row; unset = board-only (a proposal when a backlog is linked). */
   backlog?: BacklogLink;
+  /** Set when the task is a row of a brief's Subtasks table. */
+  subtask?: SubtaskLink;
   createdBy: Actor;
   createdAt: string;
   updatedAt: string;
@@ -179,10 +200,26 @@ export interface Project extends ProjectMeta {
   /** Owner priority order: task ids to do first, in order. */
   pins: string[];
   /** The backlog this board mirrors rows from (paths relative to the repo root). */
-  backlog?: { files: string[]; syncedAt: string };
+  backlog?: BacklogSource;
   events: PmEvent[];
   seq: number;
 }
+
+export interface BacklogSource {
+  files: string[];
+  syncedAt: string;
+  /** Rows whose brief Subtasks tables this board shows; group = where new subtasks go. */
+  subtasks?: { row: string; group?: string }[];
+  /** Board-only task id → row: the task becomes that row's subtask once its table lists the id. */
+  claims?: Record<string, string>;
+  /** What the last sync could not read or apply (shown by the plan check). */
+  problems?: string[];
+}
+
+/** Mirrors a backlog row or a brief subtask: its status lives in the repo's documents. */
+export const isSynced = (t: Pick<Task, 'backlog' | 'subtask'>) => !!(t.backlog || t.subtask);
+/** The status word as the documents write it, else the board's label. */
+export const statusWord = (t: Pick<Task, 'backlog' | 'subtask' | 'status'>) => t.subtask?.status || t.backlog?.status || STATUS_LABEL[t.status];
 
 export interface TaskInsight {
   id: string;

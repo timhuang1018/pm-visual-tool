@@ -52,8 +52,35 @@ says what to fix.
 
 Backlog statuses map to board statuses: Ready, In progress, Needs verification, Blocked, Done as named;
 Icebox → blocked, Cancelled → done (the card shows the original word). The project records the files as
-`backlog: {files, syncedAt}`. When a backlog is linked, an open task without `backlog` is a **proposal**.
-`pmv adopt` turns it into a mirrored row once the backlog owner has written that row.
+`backlog: {files, syncedAt, subtasks?, claims?, problems?}`. When a backlog is linked, an open task with neither
+`backlog` nor `subtask` is a **proposal** (*Not synced*). `pmv adopt` turns it into a mirrored row once the
+backlog owner has written that row.
+
+### Brief subtasks
+
+A tracked row's brief `## Subtasks` table (format in [cli.md](cli.md#brief-subtasks)) becomes tasks:
+
+```jsonc
+{ "id": "T3", "title": "Ranges and open bounds", "status": "ready", "effort": "L", "dependsOn": ["T2"],
+  "gate": { "description": "Owner reads the sample", "status": "approved", "approvedBy": "human:owner" },
+  "meta": { "estimate": "L" },
+  "subtask": { "row": "BL-381", "id": "T3", "status": "Ready", "brief": "docs/briefs/…bl381….md", "estimate": "L", "after": ["BL-487"] } }
+```
+
+| Field | Owner |
+|---|---|
+| `title`, `status`, `impact`/`effort` (when given), `dependsOn`, `gate.description`, `meta.estimate`, `subtask` | the brief's table; the server refuses other changes |
+| `group`, `requirements`, `assignee`, other `meta`, `gate.status` (the owner's approval) | the board |
+
+`subtask.after` holds waits-on the board can't draw (rows or subtasks not on it). The project keeps
+`backlog.subtasks: [{row, group?}]` (rows shown, and where their new subtasks go), `backlog.claims`
+(board-only task id → row: becomes that row's subtask once its table lists the id) and `backlog.problems`
+(what the last sync couldn't read or apply).
+
+**Sync.** The server re-reads the backlog files and tracked briefs when the board page loads, on agent reads
+(`GET /projects/:pid`, `plan.md`, `brief.md`, `check`), on `POST /sync` and when a watched file changes. It skips
+the work when no file changed. Bad data never fails a sync: an unknown status reads as Ready, a waits-on that would
+make a cycle is left out, and each becomes a `SYNC_PROBLEM`. A subtask missing from its table stays and is reported.
 
 ### Element references
 
@@ -118,8 +145,13 @@ in progress 60%, needs verification 25%, done 0%.
 | `BOARD_LARGE` | warn | More than 40 tasks: past a high-level slice |
 | `DONE_WAITS_ON_OPEN` | warn | A done task waits on an open one (follow-up linked backwards, or a reopen) |
 | `BACKLOG_MENTION` | info | A row's text names another row on the board, with no dependency path between them |
+| `NOT_SYNCED` | warn | On a linked board: cards in neither the backlog nor a brief's Subtasks table |
+| `SUBTASKS_PENDING` | info | Cards recorded for a row (`pmv subtasks export`) whose brief doesn't list them yet |
+| `SYNC_PROBLEM` | warn | Something the last sync couldn't read or apply (missing brief or table, unknown status, cycle, dropped subtask) |
+| `GATE_SKIPPED` | warn | A subtask is done in its brief while its owner gate is still pending on the board |
 
-`NO_REQUIREMENTS` and `TASK_UNLINKED` only count board-only tasks; mirrored rows are justified by their brief.
+`NO_REQUIREMENTS` and `TASK_UNLINKED` only count board-only tasks; mirrored rows and subtasks are justified by their brief.
+`BOARD_LARGE` doesn't count brief subtasks.
 
 ## HTTP API
 
@@ -135,6 +167,9 @@ Base `http://127.0.0.1:<port>/api`. Send `X-Actor: agent:<name>` (or `human:<nam
 | GET | `/projects/:pid/proposals.md?ids=a,b` | proposals as ingest cards |
 | POST | `/projects/:pid/backlog` | `{files, rows: [{id, title, status, impact?, effort?, brief?, keyword?, mentions?}], group?}` create or refresh mirrored rows |
 | POST | `/projects/:pid/tasks/:id/adopt` | a backlog row `{id, status, …}`: link the task to it, renaming it to the row id |
+| POST | `/projects/:pid/sync` | re-read the backlog and tracked briefs now: `{created, adopted, changed, problems}` |
+| POST | `/projects/:pid/subtasks` | `{files, rows: [{row, group?, claim?: [taskId…]}]}` show rows' Subtasks tables (then syncs) |
+| DELETE | `/projects/:pid/subtasks/:row` | stop showing a row's subtasks (removes their cards) |
 | GET | `/projects/:pid/check` | plan check items |
 | GET | `/projects/:pid/inbox?since=N` | owner requests (each with `about`), owner events, pins, pending gates |
 | GET | `/projects/:pid/events?since=N` | event log |
@@ -148,10 +183,11 @@ Base `http://127.0.0.1:<port>/api`. Send `X-Actor: agent:<name>` (or `human:<nam
 | POST | `/projects/:pid/comments` | `{target, kind, text, replyTo?}`; agents can't post `change`/`directive` |
 | POST | `/projects/:pid/comments/:cid/resolve` | |
 | PUT | `/projects/:pid/pins` | `{pins: [taskId…]}` |
-| WS | `/ws?project=:pid` | pushes `{type:"snapshot", view, event}` on every change |
+| WS | `/ws?project=:pid` | syncs the documents, then pushes `{type:"snapshot", view, event}` on connect and on every change |
 
 **Rules enforced by the server:**
 - agents cannot approve gates, confirm requirements, or post change requests or instructions;
-- status and sizing of a mirrored backlog row change only through `pmv pull`;
+- status and sizing of a mirrored backlog row change only through the backlog file;
+- title, status, size, waits-on and gate wording of a brief subtask change only through its Subtasks table;
 - `done` is refused while a gate is pending;
 - dependency cycles are rejected.

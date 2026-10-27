@@ -3,6 +3,7 @@ import { Background, BackgroundVariant, Controls, MarkerType, MiniMap, ReactFlow
 import { EFFORT_POINTS, STATUS_REMAINING } from '../../../shared/analysis';
 import { computeNow } from '../../../shared/now';
 import type { Group, Note, ProjectView, Rollup, Task } from '../../../shared/types';
+import { isSynced } from '../../../shared/types';
 import { FlowEdge, type FlowEdgeData } from './FlowEdge';
 import { GROUP_H, GROUP_W, GHOST_H, GHOST_W, layoutAuto, layoutScene, NODE_H, NODE_W, NOTE_H, zoomLevel, type DirPref } from './layout';
 import { BoxNode, GhostNode, GroupNode, NodeActions, TaskNode, type ReqDot, type Role } from './nodes';
@@ -198,7 +199,7 @@ export function Canvas(p: CanvasProps) {
             notes: notesFor(ref),
             reqs: p.reqDots(t.requirements),
             context: p.scope === 'critical' ? topName(t.group) : undefined,
-            proposal: !!project.backlog && !t.backlog && t.status !== 'done',
+            proposal: !!project.backlog && !isSynced(t) && t.status !== 'done',
           },
         });
       } else if (n.kind === 'group') {

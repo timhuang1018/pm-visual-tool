@@ -6,9 +6,10 @@
 |---|---|
 | `cli/main.ts` | The `pmv` CLI: board setup, auto-start, and all agent commands |
 | `server/app.ts` | HTTP + WebSocket server (`startServer`), one per project board |
-| `server/store.ts` | JSON-file store, validation and rules (gates, cycles, who may do what), events |
+| `server/store.ts` | JSON-file store, validation and rules (gates, cycles, who may do what, what the documents own), events |
+| `server/sync.ts` | Reads the backlog and tracked briefs into the store: on page load, agent reads, `pmv pull`, file changes |
 | `server/index.ts` | Development entry: API on :4317 with `data/` and the sample project |
-| `shared/` | Types, dependency analysis (critical path, work order), structure rollups and plan check, Now, plan text |
+| `shared/` | Types, dependency analysis (critical path, work order), structure rollups and plan check, Now, plan text, backlog and Subtasks parsing |
 | `web/` | React + React Flow UI (requirements rail, phase/task views, Now, Details) |
 | `agent/` | The agent skill (`pm-visual/`, installed by `pmv init` and published to skill-repo) and the demo plan |
 | `tests/` | Unit tests (`npm test`); use-case walkthrough scenarios in `tests/ux/` |

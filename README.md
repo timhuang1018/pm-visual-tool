@@ -26,7 +26,7 @@ element to request a change. The agent picks it all up through its CLI.
 In any project:
 
 ```sh
-npm i -g https://github.com/timhuang1018/pm-visual-tool/releases/download/v1.1.1/pm-visual-1.1.1.tgz
+npm i -g https://github.com/timhuang1018/pm-visual-tool/releases/download/v1.2.0/pm-visual-1.2.0.tgz
                                                      # the `pmv` CLI (runtime dependency: ws); no package.json changes
 pmv init                                             # creates .pm-visual/, starts the board, installs the agent skill
 pmv open --browser                                   # opens http://127.0.0.1:<port>/#/<project>
@@ -57,7 +57,11 @@ pmv pull BL-101 --related          # lists BL-101 and the rows it names; nothing
 pmv pull BL-101 BL-102 --yes       # mirrors them: status and size stay owned by the backlog
 pmv proposals                      # board-only work as ingest cards for the PM
 pmv adopt T-03 BL-120              # once the PM wrote the row, the card becomes it
+pmv subtasks add BL-101            # show the steps in BL-101's brief ("## Subtasks" table)
 ```
+
+The board keeps itself current: every page load (and every file change) re-reads the backlog and the tracked
+briefs, so agents only update the PM's documents. Format and commands: [docs/cli.md](docs/cli.md#brief-subtasks).
 
 ## What you see
 

@@ -63,7 +63,7 @@ any column order; `docs/BACKLOG-done.md` is read too). The board reads the backl
 
 | Command | Does |
 |---|---|
-| `pmv pull` | Refreshes every mirrored row on the board (status, impact, effort, brief link). Never adds rows |
+| `pmv pull` | Re-reads now: every mirrored row (status, impact, effort, brief link) and every tracked brief's subtasks. Never adds rows. The board also does this on every page load, agent read (`brief`, `plan`, `check`, `show`) and file change |
 | `pmv pull <row-id>... [--match "<regex>"] [--related] [--group <id>] [--file a.md,b.md]` | Lists the rows it would add: the named ones, the ones whose text, keyword or section match, and with `--related` the rows they name. Adds nothing |
 | `pmv pull ... --yes` | Adds them, in `--group` if given. Use it once the owner named or OK'd the rows |
 | `pmv proposals [<id>...]` | Board-only tasks as ingest cards for the backlog owner. A card is ready when its requirements are owner-confirmed and it has no open change request |
@@ -72,6 +72,46 @@ any column order; `docs/BACKLOG-done.md` is read too). The board reads the backl
 A mirrored task keeps its backlog status word (e.g. *Icebox*) on its card. Its status and sizing can't
 be changed on the board; its card title, phase, requirements, dependencies, gate and meta can.
 The backlog file is remembered per project; `--file` changes it.
+
+### Brief subtasks
+
+The steps of a backlog item live in its brief (the row's Brief link), as a `## Subtasks` table that the
+PM keeps:
+
+```markdown
+## Subtasks
+
+| ID | Title | Status | Depends on | Estimate | Gate |
+|---|---|---|---|---|---|
+| T1 | Period shapes | Done | — | S | — |
+| T2 | Header basis | In progress | T1 | M · Thu 10-29 | — |
+| T3 | Ranges and open bounds | Ready | T2, BL-487 | L | Owner reads the sample |
+| W2 | Paid trial on 3 samples | Ready | BL-381.C4 | S · Wed 10-28 | Owner OKs the spend |
+```
+
+| Column | Reads |
+|---|---|
+| ID | Short id, unique in the brief (`T1`, `C4`, `W2`). It is the card id unless another card has it; then `BL-381.T1` |
+| Title | Card title (a bold lead or the first clause) |
+| Status | The backlog words: Ready · In progress · Needs verification · Blocked · Done · Icebox (also todo, doing, skipped …) |
+| Depends on | Comma-separated: same-brief ids (`T1`), backlog rows (`BL-487`), another brief's subtask (`BL-381.C4`). Free text is shown, not drawn |
+| Estimate | Leading `S`/`M`/`L`, or a duration (`½ day`, `2 days`, `1 week`) for the size; any dates after it are shown as is |
+| Gate | What the owner checks before it goes on; `—` for none |
+
+The first table under the heading counts; checklists there are ignored. Optional `Effort` and `Impact` columns
+override the size.
+
+| Command | Does |
+|---|---|
+| `pmv subtasks` | Tracked rows with their subtask counts, cards waiting for a table, board-only cards, and what the sync could not read |
+| `pmv subtasks add <row-id>... [--group <id>]` | Shows these rows' Subtasks tables. New subtasks go next to their siblings, else into `--group`, else into a phase made for the row |
+| `pmv subtasks rm <row-id>` | Stops showing a row's subtasks; their cards leave the board (the brief keeps them) |
+| `pmv subtasks export [<row-id> [<task-id>...]]... [--group a,b] [--dry-run] [--write]` | Migration: prints a Subtasks table for each row from its board-only cards (named, or in `--group`, or whose title starts with the row id; no ids = guess for every card). Records that the cards belong to the row, so once its brief lists their ids they keep their id, phase, comments and gate approval. `--write` puts the table into the brief |
+
+A synced subtask's title, status, size, estimate, waits-on and gate wording come only from its table; the
+server refuses those edits and says which brief to change. The board keeps its phase, requirements,
+comments, pins and the owner's gate approval (kept while the gate wording stays the same). A board-only
+card on a linked board is a proposal, tagged *Not synced*, and `pmv check` warns about it (`NOT_SYNCED`).
 
 ## Talking to the owner
 

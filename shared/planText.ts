@@ -5,7 +5,7 @@ import { describeRef } from './describe';
 import { computeNow } from './now';
 import { childGroups } from './structure';
 import type { ProjectView, Rollup } from './types';
-import { STATUS_LABEL } from './types';
+import { STATUS_LABEL, statusWord } from './types';
 
 const pct = (r?: Rollup) => (r ? `${Math.round(r.progress * 100)}%` : '0%');
 
@@ -66,7 +66,7 @@ export function renderPlan(view: ProjectView, opts: { limit?: number } = {}): st
 
   L.push('## 4. Now');
   L.push('Must happen next:');
-  for (const n of now.next) L.push(`- #${n.rank} ${n.task.id} ${n.task.title} [${STATUS_LABEL[n.task.status]}] — ${n.reasons.join('; ')}`);
+  for (const n of now.next) L.push(`- #${n.rank} ${n.task.id} ${n.task.title} [${statusWord(n.task)}] — ${n.reasons.join('; ')}`);
   if (now.blockedCritical.length) L.push(`Blocked on the critical path: ${now.blockedCritical.map((t) => t.id).join(', ')}`);
   if (now.gates.length || now.unconfirmed.length) {
     L.push('Waiting on the owner:');
@@ -79,7 +79,7 @@ export function renderPlan(view: ProjectView, opts: { limit?: number } = {}): st
   a.order.slice(0, limit).forEach((id, i) => {
     const t = byId.get(id)!;
     const who = t.assignee ? ` @${t.assignee}` : '';
-    L.push(`${i + 1}. ${id} ${t.title} [${STATUS_LABEL[t.status]}]${who} (${t.group ?? 'no phase'}) — ${a.insights[id].reasons.join('; ') || 'no constraints'}`);
+    L.push(`${i + 1}. ${id} ${t.title} [${statusWord(t)}]${who} (${t.group ?? 'no phase'}) — ${a.insights[id].reasons.join('; ') || 'no constraints'}`);
   });
   L.push('', `Critical path (${a.criticalLength} pts): ${a.criticalPath.join(' → ') || 'none'}`, '');
 

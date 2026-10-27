@@ -3,7 +3,7 @@
 
 import { EFFORT_POINTS, STATUS_REMAINING, lineage } from './analysis';
 import type { Analysis, GroupLink, PlanCheck, Project, Rollup, StatusCounts, Structure, Task } from './types';
-import { parseRef } from './types';
+import { isSynced, parseRef } from './types';
 
 /** boardTasks: the board is a high-level slice; past this, detail belongs in briefs or the backlog. */
 export const LIMITS = { phases: 7, itemsPerGroup: 9, depth: 2, boardTasks: 40 };
@@ -110,8 +110,8 @@ export function buildStructure(p: Project, a: Analysis): Structure {
   }
   for (const l of links.values()) l.label = p.labels.find((x) => x.from === l.from && x.to === l.to)?.label ?? null;
 
-  // Mirrored backlog rows are already justified by their brief; only board-only work must trace to a requirement.
-  const unlinkedTasks = p.requirements.length ? p.tasks.filter((t) => !t.requirements.length && !t.backlog).map((t) => t.id) : [];
+  // Mirrored rows and brief subtasks are already justified by their brief; only board-only work must trace to a requirement.
+  const unlinkedTasks = p.requirements.length ? p.tasks.filter((t) => !t.requirements.length && !isSynced(t)).map((t) => t.id) : [];
   const ungroupedTasks = p.groups.length ? p.tasks.filter((t) => !t.group).map((t) => t.id) : [];
 
   const structure: Structure = { groups, requirements, phaseLinks: [...links.values()], unlinkedTasks, ungroupedTasks, checks: [] };
@@ -126,7 +126,7 @@ export function checkPlan(p: Project, a: Analysis, s: Structure): PlanCheck[] {
   const push = (c: PlanCheck) => out.push(c);
   const byId = new Map(p.groups.map((g) => [g.id, g]));
 
-  if (p.tasks.some((t) => !t.backlog) && !p.requirements.length)
+  if (p.tasks.some((t) => !isSynced(t)) && !p.requirements.length)
     push({
       level: 'warn',
       code: 'NO_REQUIREMENTS',
@@ -205,13 +205,45 @@ export function checkPlan(p: Project, a: Analysis, s: Structure): PlanCheck[] {
       });
   }
 
-  if (p.tasks.length > LIMITS.boardTasks)
+  // Brief subtasks are bounded by their briefs; the slice limit is about everything else.
+  const cards = p.tasks.filter((t) => !t.subtask).length;
+  if (cards > LIMITS.boardTasks)
     push({
       level: 'warn',
       code: 'BOARD_LARGE',
-      message: `${p.tasks.length} tasks; this board is meant to stay a high-level slice (about ${LIMITS.boardTasks}). Remove finished or unrelated work (the backlog keeps it), or keep detail as subtasks in briefs.`,
+      message: `${cards} tasks; this board is meant to stay a high-level slice (about ${LIMITS.boardTasks}). Remove finished or unrelated work (the backlog keeps it), or keep detail as subtasks in briefs.`,
       fix: 'pmv rm <id>',
     });
+
+  if (p.backlog) {
+    const claims = p.backlog.claims ?? {};
+    const loose = p.tasks.filter((t) => !isSynced(t) && !claims[t.id]).map((t) => t.id);
+    if (loose.length)
+      push({
+        level: 'warn',
+        code: 'NOT_SYNCED',
+        message: `Not in the backlog or a brief's Subtasks table: ${list(loose)}. Their status only changes by hand. If they are steps of a backlog item, put them in its brief; if they are new work, hand them to the backlog owner.`,
+        fix: 'pmv subtasks export   (prints the Subtasks table for their brief)   or   pmv proposals',
+      });
+    const waiting = Object.entries(claims);
+    if (waiting.length)
+      push({
+        level: 'info',
+        code: 'SUBTASKS_PENDING',
+        message: `Waiting for their brief's Subtasks table: ${list(waiting.map(([id, row]) => `${id}→${row}`))}. They follow the brief once it lists their ids.`,
+        fix: 'pmv subtasks export <row-id> <task-id>...   (prints the table again)',
+      });
+    for (const x of p.backlog.problems ?? []) push({ level: 'warn', code: 'SYNC_PROBLEM', message: x });
+    for (const t of p.tasks)
+      if (t.subtask && t.status === 'done' && t.gate?.status === 'pending')
+        push({
+          level: 'warn',
+          code: 'GATE_SKIPPED',
+          message: `${t.id} is ${t.subtask.status || 'done'} in ${t.subtask.row}'s brief, but the owner has not approved its gate on the board: "${t.gate.description}".`,
+          fix: `pmv ask ${t.id} "<what to check>"   (or reopen it in ${t.subtask.brief})`,
+          target: `task:${t.id}`,
+        });
+  }
 
   const tasksById = new Map(p.tasks.map((t) => [t.id, t]));
   for (const t of p.tasks) {
@@ -222,7 +254,9 @@ export function checkPlan(p: Project, a: Analysis, s: Structure): PlanCheck[] {
         level: 'warn',
         code: 'DONE_WAITS_ON_OPEN',
         message: `${t.id} is done but waits on ${open.join(', ')}. For follow-up work, make it wait on ${t.id} instead; if ${t.id} must reopen, that is a backlog decision.`,
-        fix: `pmv edit ${t.id} --deps ${t.dependsOn.filter((d) => !open.includes(d)).join(',') || 'none'} && pmv edit ${open[0]} --deps ${t.id}`,
+        fix: t.subtask
+          ? `fix "Depends on" in the Subtasks table of ${t.subtask.brief}`
+          : `pmv edit ${t.id} --deps ${t.dependsOn.filter((d) => !open.includes(d)).join(',') || 'none'} && pmv edit ${open[0]} --deps ${t.id}`,
         target: `task:${t.id}`,
       });
   }

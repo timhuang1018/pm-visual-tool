@@ -1,7 +1,7 @@
 import { createContext, memo, useContext } from 'react';
 import { Handle, Position, useStore, type Node, type NodeProps } from '@xyflow/react';
 import type { Group, Note, Rollup, Task, TaskInsight } from '../../../shared/types';
-import { STATUS_LABEL } from '../../../shared/types';
+import { STATUS_LABEL, statusWord } from '../../../shared/types';
 import { IconBot, IconCheck, IconChevron, IconGate, IconPen, IconPin, IconQuestion } from '../icons';
 import { actorKind, actorName } from '../theme';
 import { zoomLevel, type Direction } from './layout';
@@ -62,7 +62,7 @@ export type TaskNodeData = {
   reqs: ReqDot[];
   /** Phase name, shown when the view mixes phases (critical path, all tasks). */
   context?: string;
-  /** Board-only work on a board that mirrors a backlog: not in the backlog yet. */
+  /** Board-only work on a board that mirrors a backlog: not in the backlog or a brief's Subtasks table. */
   proposal?: boolean;
 };
 export type TaskNodeType = Node<TaskNodeData, 'task'>;
@@ -73,8 +73,8 @@ function TaskNodeView({ data }: NodeProps<TaskNodeType>) {
   useStore((s) => zoomLevel(s.transform[2])); // re-render on zoom level change (CSS does the rest)
   const agentWorking = t.assignee && actorKind(t.assignee) === 'agent' && t.status === 'in_progress';
   const next = ins.rank !== null && ins.rank <= 3;
-  // A backlog row keeps its own status word (e.g. "Icebox") on the card.
-  const status = t.backlog?.status || STATUS_LABEL[t.status];
+  // A backlog row or brief subtask keeps its own status word (e.g. "Icebox") on the card.
+  const status = statusWord(t);
   const cls = ['tnode', `st-${t.status}`, ins.critical && 'is-critical', role && `role-${role}`, flash && 'is-flash', changes > 0 && 'has-change', proposal && 'is-proposal']
     .filter(Boolean)
     .join(' ');
@@ -92,7 +92,7 @@ function TaskNodeView({ data }: NodeProps<TaskNodeType>) {
           <div className="tnode-near">
             <div className="tnode-head">
               <b className="tnode-id mono">{t.id}</b>
-              {context && <span className="tnode-ctx">{context}</span>}
+              {(context || t.subtask) && <span className="tnode-ctx">{context ?? t.subtask!.row}</span>}
               <span className="tnode-icons">
                 {ins.pin && <IconPin size={12} className="ico-pin" />}
                 {t.gate?.status === 'pending' && <IconGate size={13} className="ico-gate" />}
@@ -106,7 +106,7 @@ function TaskNodeView({ data }: NodeProps<TaskNodeType>) {
               {status}
             </div>
           </div>
-          {proposal && <span className="proposal-tag">Proposed</span>}
+          {proposal && <span className="proposal-tag">Not synced</span>}
           {next && <span className="next-tag">Next</span>}
           {agentWorking && (
             <div className="tnode-assignee agent working">

@@ -4,7 +4,7 @@
 import { mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { analyze, cycleIfDepends } from '../shared/analysis';
-import { backlogStatus } from '../shared/backlog';
+import { backlogStatus, knownStatus, parseDep, plain, type Subtask } from '../shared/backlog';
 import { describeRef } from '../shared/describe';
 import { buildStructure, groupChain } from '../shared/structure';
 import {
@@ -13,6 +13,7 @@ import {
   SIZES,
   STATUSES,
   STATUS_LABEL,
+  isSynced,
   parseRef,
   type Actor,
   type Comment,
@@ -95,6 +96,26 @@ export interface BacklogRowInput {
   brief?: string;
   keyword?: string;
   mentions?: string[];
+}
+/** One tracked row's brief, as the server read it. */
+export interface SubtaskSource {
+  row: string;
+  /** Card label of the row, for a phase made for its subtasks. */
+  title?: string;
+  /** Brief path relative to the repo root. */
+  brief: string;
+  items: Subtask[];
+  problems?: string[];
+  /** The brief or its table could not be read: leave the cards as they are. */
+  missing?: boolean;
+}
+/** Everything a sync read from the repo's documents. */
+export interface DocsInput {
+  files: string[];
+  /** Rows for the mirrored tasks (the ones found). */
+  rows: BacklogRowInput[];
+  subtasks: SubtaskSource[];
+  problems?: string[];
 }
 export interface PlanInput {
   requirements?: RequirementInput[];
@@ -519,6 +540,15 @@ export class Store {
         `${id} mirrors backlog row ${t.backlog.id} (${p.backlog?.files[0] ?? 'the backlog'}): its status and sizing are kept there. Change the row, then \`pmv pull\`.`,
       );
     }
+    if (t.subtask) {
+      const kept = (['status', 'impact', 'effort', 'title', 'dependsOn'] as const).filter((k) => JSON.stringify(next[k]) !== JSON.stringify(t[k]));
+      if (next.gate?.description !== t.gate?.description || !!next.gate !== !!t.gate) kept.push('gate' as never);
+      if (kept.length)
+        throw new HttpError(
+          409,
+          `${id} is subtask ${t.subtask.id} of ${t.subtask.row}: its ${kept.join(', ')} ${kept.length > 1 ? 'are' : 'is'} kept in the Subtasks table of ${t.subtask.brief}. Change the table; the board refreshes on page load or \`pmv pull\`.`,
+        );
+    }
     if (next.status === 'done' && t.status !== 'done' && next.gate?.status === 'pending' && isAgent(actor)) {
       throw new HttpError(
         409,
@@ -542,6 +572,7 @@ export class Store {
     p.labels = p.labels.filter((l) => l.from !== id && l.to !== id);
     p.notes = p.notes.filter((n) => n.target !== `task:${id}`);
     p.comments = p.comments.filter((c) => c.target !== `task:${id}`);
+    if (p.backlog?.claims) delete p.backlog.claims[id];
     this.emit(p, actor, 'task.deleted', `${id} deleted: ${t.title}`, `task:${id}`);
   }
 
@@ -601,12 +632,14 @@ export class Store {
         this.renameTask(p, id, row.id);
       }
       this.mirror(p, t, row);
+      if (p.backlog?.claims) delete p.backlog.claims[id];
       this.emit(p, actor, 'task.updated', `${id === row.id ? id : `${id} → ${row.id}`}: now tracked in the backlog`, `task:${row.id}`);
       return t;
     });
   }
 
   private mirror(p: Project, t: Task, r: BacklogRowInput) {
+    const before = JSON.stringify([t.status, t.impact, t.effort, t.assignee, t.backlog]);
     const status = backlogStatus(r.status ?? '');
     if (t.status !== 'done' && status === 'done') p.pins = p.pins.filter((x) => x !== t.id);
     t.status = status;
@@ -620,7 +653,228 @@ export class Store {
       ...(r.keyword ? { keyword: String(r.keyword) } : {}),
       ...(r.mentions?.length ? { mentions: parseList(r.mentions) } : {}),
     };
-    t.updatedAt = new Date().toISOString();
+    if (JSON.stringify([t.status, t.impact, t.effort, t.assignee, t.backlog]) !== before) t.updatedAt = new Date().toISOString();
+  }
+
+  // ---------- brief subtasks ----------
+
+  /**
+   * Show the Subtasks tables of these rows' briefs on the board. `claim` names board-only tasks
+   * that become the row's subtasks once its table lists their ids (migration: they keep their id,
+   * comments and gate approval).
+   */
+  trackSubtasks(pid: string, input: { files?: string[]; rows?: { row: string; group?: string | null; claim?: string[] }[] }, actor: Actor) {
+    const rows = input?.rows;
+    if (!Array.isArray(rows) || !rows.length) throw new HttpError(400, 'Send {files, rows: [{row, group?, claim?}]}');
+    return this.transact(pid, (p) => {
+      p.backlog ??= { files: input.files ?? [], syncedAt: new Date().toISOString() };
+      if (input.files?.length) p.backlog.files = input.files;
+      const list = (p.backlog.subtasks ??= []);
+      const claims = (p.backlog.claims ??= {});
+      for (const r of rows) {
+        if (!r?.row || !ID_RE.test(r.row)) throw new HttpError(400, `Invalid row id "${r?.row}"`);
+        const group = r.group === undefined ? undefined : this.checkGroup(p, r.group) ?? undefined;
+        const cur = list.find((x) => x.row === r.row);
+        if (cur) {
+          if (group !== undefined) cur.group = group;
+        } else list.push({ row: r.row, ...(group ? { group } : {}) });
+        for (const id of parseList(r.claim)) {
+          const t = this.task(p, id);
+          if (isSynced(t)) throw new HttpError(409, `${id} already ${t.backlog ? `mirrors backlog row ${t.backlog.id}` : `is subtask ${t.subtask!.id} of ${t.subtask!.row}`}`);
+          claims[id] = r.row;
+        }
+        const claimed = parseList(r.claim);
+        this.emit(p, actor, 'structure.updated', `Showing ${r.row}'s subtasks from its brief${claimed.length ? `; ${claimed.join(', ')} join it once the table lists them` : ''}`);
+      }
+      return { subtasks: list, claims };
+    });
+  }
+
+  /** Stop showing a row's subtasks: its cards leave the board (the brief keeps them). */
+  untrackSubtasks(pid: string, row: string, actor: Actor) {
+    return this.transact(pid, (p) => {
+      const list = p.backlog?.subtasks ?? [];
+      if (!list.some((x) => x.row === row)) throw new HttpError(404, `${row}'s subtasks are not on this board`);
+      p.backlog!.subtasks = list.filter((x) => x.row !== row);
+      for (const [id, r] of Object.entries(p.backlog!.claims ?? {})) if (r === row) delete p.backlog!.claims![id];
+      const gone = p.tasks.filter((t) => t.subtask?.row === row).map((t) => t.id);
+      for (const id of gone) this.deleteTask(pid, id, actor);
+      this.emit(p, actor, 'structure.updated', `Stopped showing ${row}'s subtasks${gone.length ? ` (removed ${gone.join(', ')})` : ''}`);
+      return { removed: gone };
+    });
+  }
+
+  /**
+   * Apply what the repo's documents say: mirrored rows' status and sizing, and every tracked row's
+   * Subtasks table (new subtasks, title, status, size, estimate, waits-on, gate wording). The board
+   * keeps placement, requirements, comments, pins and the owner's gate approvals. Never throws on
+   * bad data: what it cannot apply becomes a problem for the plan check.
+   */
+  syncDocs(pid: string, input: DocsInput, actor: Actor) {
+    return this.transact(pid, (p) => {
+      const now = new Date().toISOString();
+      p.backlog ??= { files: input.files ?? [], syncedAt: now };
+      const src = p.backlog;
+      if (input.files?.length) src.files = input.files;
+      src.syncedAt = now;
+      const problems = [...(input.problems ?? [])];
+      const changed: string[] = [];
+      const snap = (t: Task) => JSON.stringify([t.title, t.status, t.impact, t.effort, t.dependsOn, t.gate, t.meta, t.backlog, t.subtask, t.group, t.assignee]);
+
+      for (const r of input.rows ?? []) {
+        const t = p.tasks.find((x) => x.backlog?.id === r.id);
+        if (!t) continue;
+        const was = t.backlog!.status;
+        this.mirror(p, t, r);
+        if (was !== t.backlog!.status) changed.push(`${t.id} ${was} → ${t.backlog!.status}`);
+      }
+
+      const tracked = new Map((src.subtasks ?? []).map((x) => [x.row, x]));
+      const claims = (src.claims ??= {});
+      const created: Task[] = [];
+      const adopted: string[] = [];
+      const touched: { task: Task; item: Subtask; row: string; before: string }[] = [];
+      const key = (row: string, id: string) => `${row}\u0000${id}`;
+      const bySub = new Map<string, Task>();
+      for (const t of p.tasks) if (t.subtask) bySub.set(key(t.subtask.row, t.subtask.id), t);
+
+      for (const s of input.subtasks ?? []) {
+        if (!tracked.has(s.row)) continue;
+        for (const x of s.problems ?? []) problems.push(`${s.row} (${s.brief}): ${x}`);
+        if (s.missing) continue;
+        for (const item of s.items) {
+          let t = bySub.get(key(s.row, item.id));
+          let before = t ? snap(t) : '';
+          if (!t) {
+            const claimed = p.tasks.find((x) => !isSynced(x) && x.id === item.id && claims[x.id] === s.row);
+            if (claimed) {
+              t = claimed;
+              before = snap(t);
+              delete claims[item.id];
+              adopted.push(item.id);
+            } else {
+              const id = [item.id, `${s.row}.${item.id}`].find((x) => ID_RE.test(x) && !p.tasks.some((y) => y.id === x));
+              if (!id) {
+                problems.push(`${s.row} ${item.id}: no free task id (${item.id} and ${s.row}.${item.id} are taken)`);
+                continue;
+              }
+              t = {
+                id,
+                title: item.title,
+                description: '',
+                area: '',
+                status: 'ready',
+                impact: 'M',
+                effort: 'M',
+                dependsOn: [],
+                gate: null,
+                group: null,
+                requirements: [],
+                assignee: null,
+                createdBy: actor,
+                createdAt: now,
+                updatedAt: now,
+              };
+              p.tasks.push(t);
+              created.push(t);
+            }
+            bySub.set(key(s.row, item.id), t);
+          }
+          const status = backlogStatus(item.status);
+          if (item.status && !knownStatus(item.status)) problems.push(`${s.row} ${item.id}: status "${item.status}" is not a backlog status word (read as Ready)`);
+          if (!item.status) problems.push(`${s.row} ${item.id}: no status (read as Ready)`);
+          if (status === 'done' && t.status !== 'done') p.pins = p.pins.filter((x) => x !== t!.id);
+          t.title = item.title;
+          t.status = status;
+          if (item.effort) t.effort = item.effort;
+          if (item.impact) t.impact = item.impact;
+          if (status !== 'in_progress') t.assignee = null;
+          const meta = { ...(t.meta ?? {}) };
+          if (item.estimate) meta.estimate = item.estimate;
+          else delete meta.estimate;
+          if (Object.keys(meta).length) t.meta = meta;
+          else delete t.meta;
+          // The gate wording comes from the table; the owner's approval stays while the wording does.
+          if (!item.gate) t.gate = null;
+          else if (!t.gate || plain(t.gate.description) !== plain(item.gate)) t.gate = { description: item.gate, status: 'pending' };
+          t.subtask = { row: s.row, id: item.id, status: item.status, brief: s.brief, ...(item.estimate ? { estimate: item.estimate } : {}) };
+          touched.push({ task: t, item, row: s.row, before });
+        }
+        const listed = new Set(s.items.map((x) => x.id));
+        for (const t of p.tasks)
+          if (t.subtask?.row === s.row && !listed.has(t.subtask.id))
+            problems.push(`${t.id}: no longer in ${s.row}'s Subtasks table (pmv rm ${t.id} if it was dropped)`);
+      }
+
+      // Waits-on, after every subtask exists: same-brief ids, other briefs' subtasks, rows on the board.
+      const rowTask = (row: string) => p.tasks.find((x) => x.backlog?.id === row || (x.id === row && !x.subtask));
+      for (const { task } of touched) task.dependsOn = [];
+      for (const { task, item, row } of touched) {
+        const after: string[] = [];
+        for (const d of item.dependsOn) {
+          const ref = parseDep(d, row);
+          const target = !ref ? undefined : ref.id ? bySub.get(key(ref.row, ref.id)) : rowTask(ref.row);
+          if (!target) {
+            if (ref && ref.row === row && ref.id) problems.push(`${row} ${item.id}: waits on "${d}", which is not in the table`);
+            after.push(d);
+            continue;
+          }
+          if (target === task || task.dependsOn.includes(target.id)) continue;
+          const cycle = cycleIfDepends(p.tasks, task.id, [...task.dependsOn, target.id]);
+          if (cycle) {
+            problems.push(`${row} ${item.id}: waiting on ${d} would make a cycle (${cycle.join(' → ')}); left out`);
+            continue;
+          }
+          task.dependsOn.push(target.id);
+        }
+        if (after.length) task.subtask!.after = after;
+      }
+
+      // New subtasks go next to their siblings: the phase of one they wait on or that waits on
+      // them, else their siblings' usual phase, else the row's phase (made when needed).
+      for (const t of created) {
+        const row = t.subtask!.row;
+        const sib = p.tasks.filter((x) => x.subtask?.row === row && x.group && x !== t);
+        const near = sib.find((x) => t.dependsOn.includes(x.id)) ?? sib.find((x) => x.dependsOn.includes(t.id));
+        const counts = new Map<string, number>();
+        for (const x of sib) counts.set(x.group!, (counts.get(x.group!) ?? 0) + 1);
+        const usual = [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
+        t.group = near?.group ?? usual ?? this.rowGroup(p, tracked.get(row)!, input.subtasks.find((x) => x.row === row)?.title);
+      }
+
+      const lines: string[] = [];
+      if (created.length) lines.push(`new: ${created.map((t) => t.id).join(', ')}`);
+      if (adopted.length) lines.push(`now from the brief: ${adopted.join(', ')}`);
+      for (const { task, item, before } of touched) {
+        if (!before || before === snap(task) || created.includes(task) || adopted.includes(task.id)) continue;
+        task.updatedAt = now;
+        const old = JSON.parse(before)[8]?.status;
+        changed.push(old !== undefined && old !== item.status ? `${task.id} ${old || '—'} → ${item.status || '—'}` : `${task.id} updated`);
+      }
+      src.problems = [...new Set(problems)];
+      const all = [...lines, ...changed];
+      if (all.length) this.emit(p, actor, 'task.updated', `From the docs: ${truncate(all.join('; '), 300)}`);
+      return { created: created.map((t) => t.id), adopted, changed, problems: src.problems };
+    });
+  }
+
+  /** The tracked row's phase: the one set for it, else one made for it (inside the row card's phase when there is one). */
+  private rowGroup(p: Project, entry: { row: string; group?: string }, title?: string): string {
+    if (entry.group && p.groups.some((g) => g.id === entry.group)) return entry.group;
+    const id = slug(entry.row);
+    if (!p.groups.some((g) => g.id === id)) {
+      const home = p.tasks.find((t) => t.backlog?.id === entry.row)?.group;
+      const parent = home && !p.groups.find((g) => g.id === home)?.parent ? home : null;
+      p.groups.push({
+        id,
+        name: title ? `${entry.row} ${truncate(title, 40)}` : entry.row,
+        goal: `${entry.row}'s subtasks, from its brief`,
+        parent,
+        order: p.groups.filter((g) => g.parent === parent).length + 1,
+      });
+    }
+    entry.group = id;
+    return id;
   }
 
   private renameTask(p: Project, from: string, to: string) {

@@ -7,6 +7,9 @@
 //   GET    /api/projects/:pid/brief.md?since=N   short session digest (owner activity after event N)
 //   GET    /api/projects/:pid/proposals.md?ids=  board-only tasks as ingest cards for the backlog owner
 //   POST   /api/projects/:pid/backlog            {files, rows, group?} mirror backlog rows (create or refresh)
+//   POST   /api/projects/:pid/sync               re-read the backlog and tracked briefs now (also runs on page load)
+//   POST   /api/projects/:pid/subtasks           {files, rows: [{row, group?, claim?}]} show rows' brief Subtasks tables
+//   DELETE /api/projects/:pid/subtasks/:row      stop showing a row's subtasks
 //   POST   /api/projects/:pid/tasks/:id/adopt    {backlog row} a proposal became that row (renames it)
 //   POST   /api/projects/:pid/tasks              task object or array of tasks
 //   PATCH  /api/projects/:pid/tasks/:id          partial task
@@ -35,6 +38,7 @@ import { renderBrief, renderProposals } from '../shared/briefText';
 import { renderPlan } from '../shared/planText';
 import type { WsMessage } from '../shared/types';
 import { HttpError, Store } from './store';
+import { DocSync } from './sync';
 
 
 export interface ServerOptions {
@@ -46,6 +50,12 @@ export interface ServerOptions {
   /** Create the sample project from doc/tasks.md (development only). */
   seedSample?: boolean;
   host?: string;
+  /** Repo root that backlog and brief paths are relative to; null = no document sync. */
+  root?: string | null;
+  /** Re-sync when a watched document changes (default true when root is set). */
+  watch?: boolean;
+  /** Package version, reported by /api/health so the CLI can restart an older board. */
+  version?: string;
 }
 
 export interface RunningServer {
@@ -59,6 +69,12 @@ export function startServer(opts: ServerOptions): Promise<RunningServer> {
   if (opts.seedSample) store.seedSample();
   const DIST = opts.uiDir;
   const startedAt = new Date().toISOString();
+  const docs = opts.root ? new DocSync(store, opts.root) : null;
+  /** Bring a board up to date with the documents before showing it (cheap when nothing changed). */
+  const fresh = (pid: string) => {
+    docs?.safeSync(pid);
+    return pid;
+  };
 
   type Handler = (req: IncomingMessage, params: Record<string, string>, body: any, url: URL) => unknown;
   const routes: { method: string; pattern: RegExp; keys: string[]; handler: Handler }[] = [];
@@ -76,24 +92,35 @@ export function startServer(opts: ServerOptions): Promise<RunningServer> {
     return /^(agent|human):/.test(a) ? a : `agent:${a}`;
   };
 
-  route('GET', '/api/health', () => ({ ok: true, app: 'pm-visual', dataDir: opts.dataDir, startedAt, pid: process.pid }));
+  route('GET', '/api/health', () => ({ ok: true, app: 'pm-visual', version: opts.version ?? null, dataDir: opts.dataDir, startedAt, pid: process.pid }));
   route('GET', '/api/projects', () => store.listProjects());
   route('POST', '/api/projects', (req, _p, b) => {
     const p = store.createProject(b ?? {}, actorOf(req, b));
     return { id: p.id, name: p.name };
   });
-  route('GET', '/api/projects/:pid', (_r, { pid }) => store.view(pid));
+  route('GET', '/api/projects/:pid', (_r, { pid }) => store.view(fresh(pid)));
   route('GET', '/api/projects/:pid/plan.md', (_r, { pid }, _b, url) =>
-    text(renderPlan(store.view(pid), { limit: Number(url.searchParams.get('limit') ?? 15) })),
+    text(renderPlan(store.view(fresh(pid)), { limit: Number(url.searchParams.get('limit') ?? 15) })),
   );
   route('GET', '/api/projects/:pid/brief.md', (_r, { pid }, _b, url) => {
     const since = url.searchParams.get('since');
-    return text(renderBrief(store.view(pid), { ownerEvents: since === null ? [] : store.inbox(pid, Number(since)).ownerEvents }));
+    return text(renderBrief(store.view(fresh(pid)), { ownerEvents: since === null ? [] : store.inbox(pid, Number(since)).ownerEvents }));
   });
   route('GET', '/api/projects/:pid/proposals.md', (_r, { pid }, _b, url) =>
     text(renderProposals(store.view(pid), url.searchParams.get('ids')?.split(',').filter(Boolean))),
   );
   route('POST', '/api/projects/:pid/backlog', (req, { pid }, b) => store.syncBacklog(pid, b ?? {}, actorOf(req, b)));
+  const sync = (pid: string) => {
+    if (!docs) throw new HttpError(400, 'This server has no repo root, so it cannot read the backlog');
+    store.get(pid);
+    return docs.sync(pid, true) ?? { created: [], adopted: [], changed: [], problems: ['no backlog linked to this board yet'] };
+  };
+  route('POST', '/api/projects/:pid/sync', (_r, { pid }) => sync(pid));
+  route('POST', '/api/projects/:pid/subtasks', (req, { pid }, b) => {
+    const tracked = store.trackSubtasks(pid, b ?? {}, actorOf(req, b));
+    return { ...tracked, ...(docs ? sync(pid) : {}) };
+  });
+  route('DELETE', '/api/projects/:pid/subtasks/:row', (req, { pid, row }) => store.untrackSubtasks(pid, row, actorOf(req)));
   route('POST', '/api/projects/:pid/tasks/:id/adopt', (req, { pid, id }, b) => store.adoptTask(pid, id, b ?? {}, actorOf(req, b)));
   route('POST', '/api/projects/:pid/tasks', (req, { pid }, b) => {
     const list = Array.isArray(b) ? b : Array.isArray(b?.tasks) ? b.tasks : [b];
@@ -106,7 +133,7 @@ export function startServer(opts: ServerOptions): Promise<RunningServer> {
   route('POST', '/api/projects/:pid/comments/:cid/resolve', (req, { pid, cid }, b) => store.resolveComment(pid, cid, actorOf(req, b)));
   route('PUT', '/api/projects/:pid/pins', (req, { pid }, b) => ({ pins: store.setPins(pid, b?.pins, actorOf(req, b)) }));
   route('POST', '/api/projects/:pid/plan', (req, { pid }, b) => store.importPlan(pid, b, actorOf(req, b)));
-  route('GET', '/api/projects/:pid/check', (_r, { pid }) => store.view(pid).structure.checks);
+  route('GET', '/api/projects/:pid/check', (_r, { pid }) => store.view(fresh(pid)).structure.checks);
   route('POST', '/api/projects/:pid/requirements', (req, { pid }, b) => store.upsertRequirements(pid, Array.isArray(b) ? b : [b], actorOf(req, b)));
   route('PATCH', '/api/projects/:pid/requirements/:id', (req, { pid, id }, b) => store.updateRequirement(pid, id, b ?? {}, actorOf(req, b)));
   route('DELETE', '/api/projects/:pid/requirements/:id', (req, { pid, id }) => (store.deleteRequirement(pid, id, actorOf(req)), { ok: true }));
@@ -203,13 +230,14 @@ export function startServer(opts: ServerOptions): Promise<RunningServer> {
     const pid = url.searchParams.get('project');
     subs.set(ws, pid);
     push(ws, { type: 'projects', projects: store.listProjects() });
-    if (pid && store.has(pid)) push(ws, { type: 'snapshot', project: pid, view: store.view(pid) });
+    // Loading the page is the refresh: read the documents first, then show the board.
+    if (pid && store.has(pid)) push(ws, { type: 'snapshot', project: pid, view: store.view(fresh(pid)) });
     ws.on('message', (raw) => {
       try {
         const msg = JSON.parse(String(raw));
         if (msg.type === 'subscribe') {
           subs.set(ws, msg.project);
-          if (store.has(msg.project)) push(ws, { type: 'snapshot', project: msg.project, view: store.view(msg.project) });
+          if (store.has(msg.project)) push(ws, { type: 'snapshot', project: msg.project, view: store.view(fresh(msg.project)) });
         }
       } catch {
         /* ignore */
@@ -242,11 +270,13 @@ export function startServer(opts: ServerOptions): Promise<RunningServer> {
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(opts.port, opts.host ?? '127.0.0.1', () => {
+      if (docs && opts.watch !== false) docs.watch();
       resolve({
         url: `http://localhost:${opts.port}`,
         store,
         close: () =>
           new Promise<void>((done) => {
+            docs?.close();
             store.flush();
             wss.close();
             server.close(() => done());

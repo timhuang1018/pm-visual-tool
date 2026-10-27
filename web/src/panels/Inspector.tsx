@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { groupChain } from '../../../shared/structure';
 import type { Group, ProjectView, Size, Status, Task } from '../../../shared/types';
-import { SIZES, STATUSES, STATUS_LABEL, parseRef } from '../../../shared/types';
+import { SIZES, STATUSES, STATUS_LABEL, isSynced, parseRef } from '../../../shared/types';
 import { IconBot, IconCheck, IconChevron, IconGate, IconPin, IconTarget, IconX } from '../icons';
 import { actorKind, actorName, STATUS_ORDER, timeAgo } from '../theme';
 import type { Api } from '../api';
@@ -209,7 +209,14 @@ function TaskDetails({ view, id, api, actor, reqDots, onSelect, onReveal, onOpen
         <ReqChips ids={t.requirements} reqDots={reqDots} onTrace={onTrace} />
       </div>
       <MetaList meta={t.meta} />
-      {t.backlog ? (
+      {t.subtask ? (
+        <p className="ins-why">
+          Subtask {t.subtask.id} of {t.subtask.row}: <b>{t.subtask.status || '—'}</b>
+          {' · '}
+          <span className="mono">{t.subtask.brief}</span>. Status, size, waits-on and gate wording come from that brief&rsquo;s Subtasks table and
+          refresh when you reload.
+        </p>
+      ) : t.backlog ? (
         <p className="ins-why">
           Backlog row {t.backlog.id}: <b>{t.backlog.status}</b>
           {t.backlog.brief && (
@@ -222,7 +229,12 @@ function TaskDetails({ view, id, api, actor, reqDots, onSelect, onReveal, onOpen
         </p>
       ) : (
         p.backlog &&
-        t.status !== 'done' && <p className="ins-why">Proposed: not in {p.backlog.files[0]} yet. The agent hands it to the backlog once you agree.</p>
+        t.status !== 'done' && (
+          <p className="ins-why">
+            Proposed, not synced: not in {p.backlog.files[0]} or a brief&rsquo;s Subtasks table yet, so its status only changes by hand. The agent hands it to the
+            backlog once you agree.
+          </p>
+        )
       )}
 
       <div className="tp-actions">
@@ -240,7 +252,7 @@ function TaskDetails({ view, id, api, actor, reqDots, onSelect, onReveal, onOpen
       <div className="tp-grid">
         <label className="field">
           <span className="label">Status</span>
-          <select className="input" value={t.status} disabled={!!t.backlog} onChange={(e) => patch({ status: e.target.value as Status })}>
+          <select className="input" value={t.status} disabled={isSynced(t)} onChange={(e) => patch({ status: e.target.value as Status })}>
             {STATUSES.map((s) => (
               <option key={s} value={s}>
                 {STATUS_LABEL[s]}
@@ -263,11 +275,11 @@ function TaskDetails({ view, id, api, actor, reqDots, onSelect, onReveal, onOpen
         </label>
         <label className="field">
           <span className="label">Impact</span>
-          <SizeSeg value={t.impact} disabled={!!t.backlog} onChange={(v) => patch({ impact: v })} />
+          <SizeSeg value={t.impact} disabled={isSynced(t)} onChange={(v) => patch({ impact: v })} />
         </label>
         <label className="field">
           <span className="label">Effort</span>
-          <SizeSeg value={t.effort} disabled={!!t.backlog} onChange={(v) => patch({ effort: v })} />
+          <SizeSeg value={t.effort} disabled={isSynced(t)} onChange={(v) => patch({ effort: v })} />
         </label>
       </div>
 
@@ -292,7 +304,7 @@ function TaskDetails({ view, id, api, actor, reqDots, onSelect, onReveal, onOpen
       <div className="deps">
         <div className="deps-head">
           <span className="label">Waits on ({t.dependsOn.length})</span>
-          {!editDeps && isHuman && (
+          {!editDeps && isHuman && !t.subtask && (
             <button className="linklike small" onClick={() => setEditDeps(true)}>
               Edit
             </button>
@@ -314,9 +326,10 @@ function TaskDetails({ view, id, api, actor, reqDots, onSelect, onReveal, onOpen
           </form>
         ) : t.dependsOn.length ? (
           <TaskList ids={t.dependsOn} view={view} onReveal={onReveal} onHover={onHover} />
-        ) : (
+        ) : !t.subtask?.after?.length ? (
           <p className="empty small">Nothing — can start any time</p>
-        )}
+        ) : null}
+        {t.subtask?.after?.length ? <p className="small muted">Also after (not on this board): {t.subtask.after.join(', ')}</p> : null}
         <span className="label">Needed by ({ins.dependents.length})</span>
         {ins.dependents.length ? <TaskList ids={ins.dependents} view={view} onReveal={onReveal} onHover={onHover} /> : <p className="empty small">Nothing waits on this</p>}
       </div>
